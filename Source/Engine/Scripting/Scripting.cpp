@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "BinaryModule.h"
 #include "Scripting.h"
@@ -21,9 +21,10 @@
 #include "ManagedCLR/MCore.h"
 #include "ManagedCLR/MException.h"
 #include "Internal/StdTypesContainer.h"
+#include "Engine/Core/LogContext.h"
 #include "Engine/Core/ObjectsRemovalService.h"
 #include "Engine/Core/Types/TimeSpan.h"
-#include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Core/Types/Stopwatch.h"
 #include "Engine/Content/Asset.h"
 #include "Engine/Content/Content.h"
 #include "Engine/Engine/EngineService.h"
@@ -31,6 +32,7 @@
 #include "Engine/Engine/Time.h"
 #include "Engine/Graphics/RenderTask.h"
 #include "Engine/Serialization/JsonTools.h"
+#include "Engine/Profiler/ProfilerCPU.h"
 
 extern void registerFlaxEngineInternalCalls();
 
@@ -108,6 +110,45 @@ namespace
 #if USE_EDITOR
     bool LastBinariesLoadTriggeredCompilation = false;
 #endif
+
+    void ReleaseObjects(bool gameOnly)
+    {
+        // Flush objects already enqueued objects to delete
+        ObjectsRemovalService::Flush();
+
+        // Give GC a try to cleanup old user objects and the other mess
+        MCore::GC::Collect();
+        MCore::GC::WaitForPendingFinalizers();
+
+        // Destroy objects from game assemblies (eg. not released objects that might crash if persist in memory after reload)
+        const auto flaxModule = GetBinaryModuleFlaxEngine();
+        _objectsLocker.Lock();
+        for (auto i = _objectsDictionary.Begin(); i.IsNotEnd(); ++i)
+        {
+            auto obj = i->Value;
+            if (gameOnly && obj->GetTypeHandle().Module == flaxModule)
+                continue;
+
+#if USE_OBJECTS_DISPOSE_CRASHES_DEBUGGING
+            LOG(Info, "[OnScriptingDispose] obj = 0x{0:x}, {1}", (uint64)obj.Ptr, String(obj.TypeName));
+#endif
+            obj->OnScriptingDispose();
+        }
+        _objectsLocker.Unlock();
+
+        // Release assets sourced from game assemblies
+        Array<Asset*> assets = Content::GetAssets();
+        for (auto asset : assets)
+        {
+            if (asset->GetTypeHandle().Module == flaxModule)
+            {
+                continue;
+            }
+
+            asset->DeleteObject();
+        }
+        ObjectsRemovalService::Flush();
+    }
 }
 
 Delegate<BinaryModule*> Scripting::BinaryModuleLoaded;
@@ -115,7 +156,13 @@ Action Scripting::ScriptsLoaded;
 Action Scripting::ScriptsUnload;
 Action Scripting::ScriptsReloading;
 Action Scripting::ScriptsReloaded;
-ThreadLocal<Scripting::IdsMappingTable*, PLATFORM_THREADS_LIMIT, true> Scripting::ObjectsLookupIdMapping;
+Action Scripting::Update;
+Action Scripting::LateUpdate;
+Action Scripting::FixedUpdate;
+Action Scripting::LateFixedUpdate;
+Action Scripting::Draw;
+Action Scripting::Exit;
+ThreadLocal<Scripting::IdsMappingTable*, PLATFORM_THREADS_LIMIT> Scripting::ObjectsLookupIdMapping;
 ScriptingService ScriptingServiceInstance;
 
 bool initFlaxEngine();
@@ -126,7 +173,7 @@ void onEngineUnloading(MAssembly* assembly);
 
 bool ScriptingService::Init()
 {
-    const auto startTime = DateTime::NowUTC();
+    Stopwatch stopwatch;
 
     // Initialize managed runtime
     if (MCore::LoadEngine())
@@ -158,16 +205,15 @@ bool ScriptingService::Init()
         return true;
     }
 
-    auto endTime = DateTime::NowUTC();
-    LOG(Info, "Scripting Engine initializated! (time: {0}ms)", (int32)((endTime - startTime).GetTotalMilliseconds()));
-
+    stopwatch.Stop();
+    LOG(Info, "Scripting Engine initializated! (time: {0}ms)", stopwatch.GetMilliseconds());
     return false;
 }
 
 #if COMPILE_WITHOUT_CSHARP
-#define INVOKE_EVENT(name)
+#define INVOKE_EVENT(name) Scripting::name();
 #else
-#define INVOKE_EVENT(name) \
+#define INVOKE_EVENT(name) Scripting::name(); \
     if (!_isEngineAssemblyLoaded) return; \
 	if (_method_##name == nullptr) \
 	{ \
@@ -357,7 +403,7 @@ bool Scripting::LoadBinaryModules(const String& path, const String& projectFolde
                     if (!module)
                     {
                         // Load library
-                        const auto startTime = DateTime::NowUTC();
+                        Stopwatch stopwatch;
 #if PLATFORM_ANDROID || PLATFORM_MAC
                         // On some platforms all native binaries are side-by-side with the app in a different folder
                         if (!FileSystem::FileExists(nativePath))
@@ -390,8 +436,8 @@ bool Scripting::LoadBinaryModules(const String& path, const String& projectFolde
                             LOG(Error, "Failed to setup library '{0}' for binary module {1}.", nativePath, name);
                             return true;
                         }
-                        const auto endTime = DateTime::NowUTC();
-                        LOG(Info, "Module {0} loaded in {1}ms", name, (int32)(endTime - startTime).GetTotalMilliseconds());
+                        stopwatch.Stop();
+                        LOG(Info, "Module {0} loaded in {1}ms", name, stopwatch.GetMilliseconds());
 
                         // Get the binary module
                         module = getBinaryFunc();
@@ -566,36 +612,8 @@ void Scripting::Release()
     // Fire event
     ScriptsUnload();
 
-    // Cleanup
-    ObjectsRemovalService::Flush();
-
-    // Cleanup some managed objects
-    MCore::GC::Collect();
-    MCore::GC::WaitForPendingFinalizers();
-
     // Release managed objects instances for persistent objects (assets etc.)
-    _objectsLocker.Lock();
-    {
-        for (auto i = _objectsDictionary.Begin(); i.IsNotEnd(); ++i)
-        {
-            auto obj = i->Value;
-#if USE_OBJECTS_DISPOSE_CRASHES_DEBUGGING
-            LOG(Info, "[OnScriptingDispose] obj = 0x{0:x}, {1}", (uint64)obj.Ptr, String(obj.TypeName));
-#endif
-            obj->OnScriptingDispose();
-        }
-    }
-    _objectsLocker.Unlock();
-
-    // Release assets sourced from game assemblies
-    const auto flaxModule = GetBinaryModuleFlaxEngine();
-    for (auto asset : Content::GetAssets())
-    {
-        if (asset->GetTypeHandle().Module == flaxModule)
-            continue;
-
-        asset->DeleteObjectNow();
-    }
+    ReleaseObjects(false);
 
     auto* flaxEngineModule = (NativeBinaryModule*)GetBinaryModuleFlaxEngine();
     onEngineUnloading(flaxEngineModule->Assembly);
@@ -673,39 +691,8 @@ void Scripting::Reload(bool canTriggerSceneReload)
     LOG(Info, "Start user scripts reload");
     ScriptsReloading();
 
-    // Flush cache (some objects may be deleted after reload start event)
-    ObjectsRemovalService::Flush();
-
-    // Give GC a try to cleanup old user objects and the other mess
-    MCore::GC::Collect();
-    MCore::GC::WaitForPendingFinalizers();
-
     // Destroy objects from game assemblies (eg. not released objects that might crash if persist in memory after reload)
-    const auto flaxModule = GetBinaryModuleFlaxEngine();
-    _objectsLocker.Lock();
-    {
-        for (auto i = _objectsDictionary.Begin(); i.IsNotEnd(); ++i)
-        {
-            auto obj = i->Value;
-            if (obj->GetTypeHandle().Module == flaxModule)
-                continue;
-
-#if USE_OBJECTS_DISPOSE_CRASHES_DEBUGGING
-            LOG(Info, "[OnScriptingDispose] obj = 0x{0:x}, {1}", (uint64)obj.Ptr, String(obj.TypeName));
-#endif
-            obj->OnScriptingDispose();
-        }
-    }
-    _objectsLocker.Unlock();
-
-    // Release assets sourced from game assemblies
-    for (auto asset : Content::GetAssets())
-    {
-        if (asset->GetTypeHandle().Module == flaxModule)
-            continue;
-
-        asset->DeleteObjectNow();
-    }
+    ReleaseObjects(true);
 
     // Unload all game modules
     LOG(Info, "Unloading game binary modules");
@@ -740,6 +727,15 @@ void Scripting::Reload(bool canTriggerSceneReload)
 }
 
 #endif
+
+Array<ScriptingObject*, HeapAllocation> Scripting::GetObjects()
+{
+    Array<ScriptingObject*> objects;
+    _objectsLocker.Lock();
+    _objectsDictionary.GetValues(objects);
+    _objectsLocker.Unlock();
+    return objects;
+}
 
 MClass* Scripting::FindClass(const StringAnsiView& fullname)
 {
@@ -852,13 +848,15 @@ void ScriptingObjectReferenceBase::OnSet(ScriptingObject* object)
 
 void ScriptingObjectReferenceBase::OnDeleted(ScriptingObject* obj)
 {
-    ASSERT(_object == obj);
-    _object->Deleted.Unbind<ScriptingObjectReferenceBase, &ScriptingObjectReferenceBase::OnDeleted>(this);
-    _object = nullptr;
-    Changed();
+    if (_object == obj)
+    {
+        _object->Deleted.Unbind<ScriptingObjectReferenceBase, &ScriptingObjectReferenceBase::OnDeleted>(this);
+        _object = nullptr;
+        Changed();
+    }
 }
 
-ScriptingObject* Scripting::FindObject(Guid id, MClass* type)
+ScriptingObject* Scripting::FindObject(Guid id, const MClass* type)
 {
     if (!id.IsValid())
         return nullptr;
@@ -889,7 +887,8 @@ ScriptingObject* Scripting::FindObject(Guid id, MClass* type)
         // Check type
         if (!type || result->Is(type))
             return result;
-        LOG(Warning, "Found scripting object with ID={0} of type {1} that doesn't match type {2}.", id, String(result->GetType().Fullname), String(type->GetFullName()));
+        LOG(Warning, "Found scripting object with ID={0} of type {1} that doesn't match type {2}", id, String(result->GetType().Fullname), String(type->GetFullName()));
+        LogContext::Print(LogType::Warning);
         return nullptr;
     }
 
@@ -908,11 +907,12 @@ ScriptingObject* Scripting::FindObject(Guid id, MClass* type)
             return asset;
     }
 
-    LOG(Warning, "Unable to find scripting object with ID={0}. Required type {1}.", id, String(type->GetFullName()));
+    LOG(Warning, "Unable to find scripting object with ID={0}. Required type {1}", id, String(type->GetFullName()));
+    LogContext::Print(LogType::Warning);
     return nullptr;
 }
 
-ScriptingObject* Scripting::TryFindObject(Guid id, MClass* type)
+ScriptingObject* Scripting::TryFindObject(Guid id, const MClass* type)
 {
     if (!id.IsValid())
         return nullptr;
@@ -948,7 +948,7 @@ ScriptingObject* Scripting::TryFindObject(Guid id, MClass* type)
     return result;
 }
 
-ScriptingObject* Scripting::TryFindObject(MClass* type)
+ScriptingObject* Scripting::TryFindObject(const MClass* type)
 {
     if (type == nullptr)
         return nullptr;
@@ -1018,7 +1018,7 @@ bool Scripting::IsEveryAssemblyLoaded()
     return true;
 }
 
-bool Scripting::IsTypeFromGameScripts(MClass* type)
+bool Scripting::IsTypeFromGameScripts(const MClass* type)
 {
     const auto binaryModule = ManagedBinaryModule::GetModule(type ? type->GetAssembly() : nullptr);
     return binaryModule && binaryModule != GetBinaryModuleCorlib() && binaryModule != GetBinaryModuleFlaxEngine();

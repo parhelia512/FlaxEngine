@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -155,7 +155,7 @@ public:
 
     // [IFogRenderer]
     void GetVolumetricFogOptions(VolumetricFogOptions& result) const override;
-    void GetExponentialHeightFogData(const RenderView& view, ExponentialHeightFogData& result) const override;
+    void GetExponentialHeightFogData(const RenderView& view, ShaderExponentialHeightFogData& result) const override;
     void DrawFog(GPUContext* context, RenderContext& renderContext, GPUTextureView* output) override;
 
 protected:

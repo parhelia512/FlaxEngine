@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -417,13 +417,11 @@ public:
 
 public:
 #if USE_EDITOR
-
     /// <summary>
     /// Gets the asset references (see Asset.GetReferences for more info).
     /// </summary>
-    /// <param name="output">The output.</param>
-    void GetReferences(Array<Guid>& output) const;
-
+    /// <param name="assets">The output assets.</param>
+    void GetReferences(Array<Guid>& assets) const;
 #endif
 
     bool HasContentLoaded() const;

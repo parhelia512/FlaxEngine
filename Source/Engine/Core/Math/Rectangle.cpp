@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Rectangle.h"
 #include "../Types/String.h"
@@ -99,7 +99,7 @@ Rectangle Rectangle::FromPoints(const Float2& p1, const Float2& p2)
     return Rectangle(upperLeft, Math::Max(rightBottom - upperLeft, Float2::Zero));
 }
 
-Rectangle Rectangle::FromPoints(Float2* points, int32 pointsCount)
+Rectangle Rectangle::FromPoints(const Float2* points, int32 pointsCount)
 {
     ASSERT(pointsCount > 0);
     Float2 upperLeft = points[0];

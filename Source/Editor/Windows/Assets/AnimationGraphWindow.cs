@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -154,10 +154,11 @@ namespace FlaxEditor.Windows.Assets
         }
 
         [StructLayout(LayoutKind.Sequential)]
-        private struct AnimGraphDebugFlowInfo
+        private unsafe struct AnimGraphDebugFlowInfo
         {
             public uint NodeId;
             public int BoxId;
+            public fixed uint NodePath[8];
         }
 
         private FlaxObjectRefPickerControl _debugPicker;
@@ -205,6 +206,7 @@ namespace FlaxEditor.Windows.Assets
             _surface.ContextChanged += OnSurfaceContextChanged;
 
             // Toolstrip
+            SurfaceUtils.PerformCommonSetup(this, _toolstrip, _surface, out _saveButton, out _undoButton, out _redoButton);
             _showNodesButton = (ToolStripButton)_toolstrip.AddButton(editor.Icons.Bone64, () => _preview.ShowNodes = !_preview.ShowNodes).LinkTooltip("Show animated model nodes debug view");
             _toolstrip.AddSeparator();
             _toolstrip.AddButton(editor.Icons.Docs64, () => Platform.OpenUrl(Utilities.Constants.DocsUrl + "manual/animation/anim-graph/index.html")).LinkTooltip("See documentation to learn more");
@@ -252,25 +254,26 @@ namespace FlaxEditor.Windows.Assets
             return obj is AnimatedModel player && player.AnimationGraph == OriginalAsset;
         }
 
-        private void OnDebugFlow(Asset asset, Object obj, uint nodeId, uint boxId)
+        private unsafe void OnDebugFlow(Animations.DebugFlowInfo flowInfo)
         {
             // Filter the flow
             if (_debugPicker.Value != null)
             {
-                if (asset != OriginalAsset || _debugPicker.Value != obj)
+                if (flowInfo.Asset != OriginalAsset || _debugPicker.Value != flowInfo.Instance)
                     return;
             }
             else
             {
-                if (asset != Asset || _preview.PreviewActor != obj)
+                if (flowInfo.Asset != Asset || _preview.PreviewActor != flowInfo.Instance)
                     return;
             }
 
             // Register flow to show it in UI on a surface
-            var flowInfo = new AnimGraphDebugFlowInfo { NodeId = nodeId, BoxId = (int)boxId };
+            var flow = new AnimGraphDebugFlowInfo { NodeId = flowInfo.NodeId, BoxId = (int)flowInfo.BoxId };
+            Utils.MemoryCopy(new IntPtr(flow.NodePath), new IntPtr(flowInfo.NodePath0), sizeof(uint) * 8ul);
             lock (_debugFlows)
             {
-                _debugFlows.Add(flowInfo);
+                _debugFlows.Add(flow);
             }
         }
 
@@ -291,6 +294,15 @@ namespace FlaxEditor.Windows.Assets
             }
 
             base.SetParameter(index, value);
+        }
+
+        /// <summary>
+        /// Sets the base model of the animation graph this window is editing.
+        /// </summary>
+        /// <param name="baseModel">The new base model.</param>
+        public void SetBaseModel(SkinnedModel baseModel)
+        {
+            _properties.BaseModel = baseModel;
         }
 
         /// <inheritdoc />
@@ -394,7 +406,7 @@ namespace FlaxEditor.Windows.Assets
         }
 
         /// <inheritdoc />
-        public override void OnUpdate()
+        public override unsafe void OnUpdate()
         {
             // Extract animations playback state from the events tracing
             var debugActor = _debugPicker.Value as AnimatedModel;
@@ -413,7 +425,8 @@ namespace FlaxEditor.Windows.Assets
             {
                 foreach (var debugFlow in _debugFlows)
                 {
-                    var node = Surface.Context.FindNode(debugFlow.NodeId);
+                    var context = Surface.FindContext(new Span<uint>(debugFlow.NodePath, 8));
+                    var node = context?.FindNode(debugFlow.NodeId);
                     var box = node?.GetBox(debugFlow.BoxId);
                     box?.HighlightConnections();
                 }

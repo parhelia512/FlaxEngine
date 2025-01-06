@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "TextRender.h"
 #include "Engine/Core/Math/OrientedBoundingBox.h"
@@ -17,6 +17,7 @@
 #include "Engine/Content/Assets/MaterialInstance.h"
 #include "Engine/Content/Content.h"
 #include "Engine/Core/Types/Variant.h"
+#include "Engine/Graphics/RenderTools.h"
 #include "Engine/Localization/Localization.h"
 #if USE_EDITOR
 #include "Editor/Editor.h"
@@ -239,7 +240,7 @@ void TextRender::UpdateLayout()
                 const bool isWhitespace = StringUtils::IsWhitespace(c);
                 if (!isWhitespace && previous.IsValid)
                 {
-                    kerning = font->GetKerning(previous.Character, entry.Character);
+                    kerning = entry.Font->GetKerning(previous.Character, entry.Character);
                 }
                 else
                 {
@@ -366,14 +367,10 @@ void TextRender::Draw(RenderContext& renderContext)
         DrawCall drawCall;
         drawCall.World = world;
         drawCall.ObjectPosition = drawCall.World.GetTranslation();
-        drawCall.ObjectRadius = _sphere.Radius;
+        drawCall.ObjectRadius = (float)_sphere.Radius;
         drawCall.Surface.GeometrySize = _localBox.GetSize();
         drawCall.Surface.PrevWorld = _drawState.PrevWorld;
-        drawCall.Surface.Lightmap = nullptr;
-        drawCall.Surface.LightmapUVsArea = Rectangle::Empty;
-        drawCall.Surface.Skinning = nullptr;
-        drawCall.Surface.LODDitherFactor = 0.0f;
-        drawCall.WorldDeterminantSign = Math::FloatSelect(world.RotDeterminant(), 1, -1);
+        drawCall.WorldDeterminantSign = RenderTools::GetWorldDeterminantSign(drawCall.World);
         drawCall.PerInstanceRandom = GetPerInstanceRandom();
         drawCall.Geometry.IndexBuffer = _ib.GetBuffer();
         drawCall.Geometry.VertexBuffers[0] = _vb0.GetBuffer();
@@ -418,7 +415,7 @@ void TextRender::OnDebugDrawSelected()
 void TextRender::OnLayerChanged()
 {
     if (_sceneRenderingKey != -1)
-        GetSceneRendering()->UpdateActor(this, _sceneRenderingKey);
+        GetSceneRendering()->UpdateActor(this, _sceneRenderingKey, ISceneRenderingListener::Layer);
 }
 
 bool TextRender::IntersectsItself(const Ray& ray, Real& distance, Vector3& normal)

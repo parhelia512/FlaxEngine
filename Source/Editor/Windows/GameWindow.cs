@@ -1,8 +1,9 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
 using System.Xml;
+using FlaxEditor.Gizmo;
 using FlaxEditor.GUI.ContextMenu;
 using FlaxEditor.GUI.Input;
 using FlaxEditor.Options;
@@ -23,6 +24,7 @@ namespace FlaxEditor.Windows
         private bool _showGUI = true;
         private bool _showDebugDraw = false;
         private bool _isMaximized = false, _isUnlockingMouse = false;
+        private bool _isFloating = false, _isBorderless = false;
         private bool _cursorVisible = true;
         private float _gameStartTime;
         private GUI.Docking.DockState _maximizeRestoreDockState;
@@ -36,6 +38,28 @@ namespace FlaxEditor.Windows
         private float _windowAspectRatio = 1;
         private bool _useAspect = false;
         private bool _freeAspect = true;
+
+        private List<PlayModeFocusOptions> _focusOptions = new List<PlayModeFocusOptions>()
+        {
+            new PlayModeFocusOptions
+            {
+                Name = "None",
+                Tooltip = "Don't change focus.",
+                FocusOption = InterfaceOptions.PlayModeFocus.None,
+            },
+            new PlayModeFocusOptions
+            {
+                Name = "Game Window",
+                Tooltip = "Focus the Game Window.",
+                FocusOption = InterfaceOptions.PlayModeFocus.GameWindow,
+            },
+            new PlayModeFocusOptions
+            {
+                Name = "Game Window Then Restore",
+                Tooltip = "Focus the Game Window. On play mode end restore focus to the previous window.",
+                FocusOption = InterfaceOptions.PlayModeFocus.GameWindowThenRestore,
+            },
+        };
 
         /// <summary>
         /// Gets the viewport.
@@ -68,7 +92,7 @@ namespace FlaxEditor.Windows
         }
 
         /// <summary>
-        /// Gets or sets a value indicating whether game window is maximized (only in play mode).
+        /// Gets or sets a value indicating whether the game window is maximized (only in play mode).
         /// </summary>
         private bool IsMaximized
         {
@@ -78,20 +102,42 @@ namespace FlaxEditor.Windows
                 if (_isMaximized == value)
                     return;
                 _isMaximized = value;
+                if (value)
+                {
+                    IsFloating = true;
+                    var rootWindow = RootWindow;
+                    rootWindow.Maximize();
+                }
+                else
+                {
+                    IsFloating = false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the game window is floating (popup, only in play mode).
+        /// </summary>
+        private bool IsFloating
+        {
+            get => _isFloating;
+            set
+            {
+                if (_isFloating == value)
+                    return;
+                _isFloating = value;
                 var rootWindow = RootWindow;
                 if (value)
                 {
-                    // Maximize
                     _maximizeRestoreDockTo = _dockedTo;
                     _maximizeRestoreDockState = _dockedTo.TryGetDockState(out _);
                     if (_maximizeRestoreDockState != GUI.Docking.DockState.Float)
                     {
                         var monitorBounds = Platform.GetMonitorBounds(PointToScreen(Size * 0.5f));
-                        ShowFloating(monitorBounds.Location + new Float2(200, 200), Float2.Zero, WindowStartPosition.Manual);
-                        rootWindow = RootWindow;
+                        var size = DefaultSize;
+                        var location = monitorBounds.Location + monitorBounds.Size * 0.5f - size * 0.5f;
+                        ShowFloating(location, size, WindowStartPosition.Manual);
                     }
-                    if (rootWindow != null && !rootWindow.IsMaximized)
-                        rootWindow.Maximize();
                 }
                 else
                 {
@@ -106,14 +152,41 @@ namespace FlaxEditor.Windows
         }
 
         /// <summary>
+        /// Gets or sets a value indicating whether the game window is borderless (only in play mode).
+        /// </summary>
+        private bool IsBorderless
+        {
+            get => _isBorderless;
+            set
+            {
+                if (_isBorderless == value)
+                    return;
+                _isBorderless = value;
+                if (value)
+                {
+                    IsFloating = true;
+                    var rootWindow = RootWindow;
+                    var monitorBounds = Platform.GetMonitorBounds(rootWindow.RootWindow.Window.ClientPosition);
+                    rootWindow.Window.Position = monitorBounds.Location;
+                    rootWindow.Window.SetBorderless(true);
+                    rootWindow.Window.ClientSize = monitorBounds.Size;
+                }
+                else
+                {
+                    IsFloating = false;
+                }
+            }
+        }
+
+        /// <summary>
         /// Gets or sets a value indicating whether center mouse position on window focus in play mode. Helps when working with games that lock mouse cursor.
         /// </summary>
         public bool CenterMouseOnFocus { get; set; }
 
         /// <summary>
-        /// Gets or sets a value indicating whether auto-focus game window on play mode start.
+        /// Gets or sets a value indicating what panel should be focused when play mode start.
         /// </summary>
-        public bool FocusOnPlay { get; set; }
+        public InterfaceOptions.PlayModeFocus FocusOnPlayOption { get; set; }
 
         private enum ViewportScaleType
         {
@@ -144,121 +217,37 @@ namespace FlaxEditor.Windows
             public bool Active;
         }
 
-        private class GameRoot : ContainerControl
+        private class PlayModeFocusOptions
         {
-            public bool EnableEvents => !Time.GamePaused;
+            /// <summary>
+            /// The name.
+            /// </summary>
+            public string Name;
 
-            public override bool OnCharInput(char c)
-            {
-                if (!EnableEvents)
-                    return false;
+            /// <summary>
+            /// The tooltip.
+            /// </summary>
+            public string Tooltip;
 
-                return base.OnCharInput(c);
-            }
+            /// <summary>
+            /// The type of focus.
+            /// </summary>
+            public InterfaceOptions.PlayModeFocus FocusOption;
 
-            public override DragDropEffect OnDragDrop(ref Float2 location, DragData data)
-            {
-                if (!EnableEvents)
-                    return DragDropEffect.None;
+            /// <summary>
+            /// If the option is active.
+            /// </summary>
+            public bool Active;
+        }
 
-                return base.OnDragDrop(ref location, data);
-            }
-
-            public override DragDropEffect OnDragEnter(ref Float2 location, DragData data)
-            {
-                if (!EnableEvents)
-                    return DragDropEffect.None;
-
-                return base.OnDragEnter(ref location, data);
-            }
-
-            public override void OnDragLeave()
-            {
-                if (!EnableEvents)
-                    return;
-
-                base.OnDragLeave();
-            }
-
-            public override DragDropEffect OnDragMove(ref Float2 location, DragData data)
-            {
-                if (!EnableEvents)
-                    return DragDropEffect.None;
-
-                return base.OnDragMove(ref location, data);
-            }
-
-            public override bool OnKeyDown(KeyboardKeys key)
-            {
-                if (!EnableEvents)
-                    return false;
-
-                return base.OnKeyDown(key);
-            }
-
-            public override void OnKeyUp(KeyboardKeys key)
-            {
-                if (!EnableEvents)
-                    return;
-
-                base.OnKeyUp(key);
-            }
-
-            public override bool OnMouseDoubleClick(Float2 location, MouseButton button)
-            {
-                if (!EnableEvents)
-                    return false;
-
-                return base.OnMouseDoubleClick(location, button);
-            }
-
-            public override bool OnMouseDown(Float2 location, MouseButton button)
-            {
-                if (!EnableEvents)
-                    return false;
-
-                return base.OnMouseDown(location, button);
-            }
-
-            public override void OnMouseEnter(Float2 location)
-            {
-                if (!EnableEvents)
-                    return;
-
-                base.OnMouseEnter(location);
-            }
-
-            public override void OnMouseLeave()
-            {
-                if (!EnableEvents)
-                    return;
-
-                base.OnMouseLeave();
-            }
-
-            public override void OnMouseMove(Float2 location)
-            {
-                if (!EnableEvents)
-                    return;
-
-                base.OnMouseMove(location);
-            }
-
-            public override bool OnMouseUp(Float2 location, MouseButton button)
-            {
-                if (!EnableEvents)
-                    return false;
-
-                return base.OnMouseUp(location, button);
-            }
-
-            public override bool OnMouseWheel(Float2 location, float delta)
-            {
-                if (!EnableEvents)
-                    return false;
-
-                return base.OnMouseWheel(location, delta);
-            }
+        /// <summary>
+        /// Root control for game UI preview in Editor. Supports basic UI editing via <see cref="UIEditorRoot"/>.
+        /// </summary>
+        private class GameRoot : UIEditorRoot
+        {
+            public override bool EnableInputs => !Time.GamePaused && Editor.IsPlayMode;
+            public override bool EnableSelecting => !Editor.IsPlayMode || Time.GamePaused;
+            public override TransformGizmo TransformGizmo => Editor.Instance.MainTransformGizmo;
         }
 
         /// <summary>
@@ -286,13 +275,9 @@ namespace FlaxEditor.Windows
             // Override the game GUI root
             _guiRoot = new GameRoot
             {
-                AnchorPreset = AnchorPresets.StretchAll,
-                Offsets = Margin.Zero,
-                //Visible = false,
-                AutoFocus = false,
                 Parent = _viewport
             };
-            RootControl.GameRoot = _guiRoot;
+            RootControl.GameRoot = _guiRoot.UIRoot;
 
             SizeChanged += control => { ResizeViewport(); };
 
@@ -306,8 +291,70 @@ namespace FlaxEditor.Windows
             InputActions.Add(options => options.TakeScreenshot, () => Screenshot.Capture(string.Empty));
             InputActions.Add(options => options.DebuggerUnlockMouse, UnlockMouseInPlay);
             InputActions.Add(options => options.ToggleFullscreen, () => { if (Editor.IsPlayMode) IsMaximized = !IsMaximized; });
-
-            FlaxEditor.Utilities.Utils.SetupCommonInputActions(this);
+            InputActions.Add(options => options.Play, Editor.Instance.Simulation.DelegatePlayOrStopPlayInEditor);
+            InputActions.Add(options => options.Pause, Editor.Instance.Simulation.RequestResumeOrPause);
+            InputActions.Add(options => options.StepFrame, Editor.Instance.Simulation.RequestPlayOneFrame);
+            InputActions.Add(options => options.ProfilerStartStop, () =>
+            {
+                bool recording = !Editor.Instance.Windows.ProfilerWin.LiveRecording;
+                Editor.Instance.Windows.ProfilerWin.LiveRecording = recording;
+                Editor.Instance.UI.AddStatusMessage($"Profiling {(recording ? "started" : "stopped")}.");
+            });
+            InputActions.Add(options => options.ProfilerClear, () =>
+            {
+                Editor.Instance.Windows.ProfilerWin.Clear();
+                Editor.Instance.UI.AddStatusMessage($"Profiling results cleared.");
+            });
+            InputActions.Add(options => options.Save, () =>
+            {
+                if (Editor.IsPlayMode)
+                    return;
+                Editor.Instance.SaveAll();
+            });
+            InputActions.Add(options => options.Undo, () =>
+            {
+                if (Editor.IsPlayMode)
+                    return;
+                Editor.Instance.PerformUndo();
+                Focus();
+            });
+            InputActions.Add(options => options.Redo, () =>
+            {
+                if (Editor.IsPlayMode)
+                    return;
+                Editor.Instance.PerformRedo();
+                Focus();
+            });
+            InputActions.Add(options => options.Cut, () =>
+            {
+                if (Editor.IsPlayMode)
+                    return;
+                Editor.Instance.SceneEditing.Cut();
+            });
+            InputActions.Add(options => options.Copy, () =>
+            {
+                if (Editor.IsPlayMode)
+                    return;
+                Editor.Instance.SceneEditing.Copy();
+            });
+            InputActions.Add(options => options.Paste, () =>
+            {
+                if (Editor.IsPlayMode)
+                    return;
+                Editor.Instance.SceneEditing.Paste();
+            });
+            InputActions.Add(options => options.Duplicate, () =>
+            {
+                if (Editor.IsPlayMode)
+                    return;
+                Editor.Instance.SceneEditing.Duplicate();
+            });
+            InputActions.Add(options => options.Delete, () =>
+            {
+                if (Editor.IsPlayMode)
+                    return;
+                Editor.Instance.SceneEditing.Delete();
+            });
         }
 
         private void ChangeViewportRatio(ViewportScaleOptions v)
@@ -320,7 +367,7 @@ namespace FlaxEditor.Windows
                 return;
             }
 
-            if (string.Equals(v.Label, "Free Aspect") && v.Size == new Int2(1, 1))
+            if (string.Equals(v.Label, "Free Aspect", StringComparison.Ordinal) && v.Size == new Int2(1, 1))
             {
                 _freeAspect = true;
                 _useAspect = true;
@@ -428,7 +475,7 @@ namespace FlaxEditor.Windows
         private void OnOptionsChanged(EditorOptions options)
         {
             CenterMouseOnFocus = options.Interface.CenterMouseOnGameWinFocus;
-            FocusOnPlay = options.Interface.FocusGameWinOnPlay;
+            FocusOnPlayOption = options.Interface.FocusOnPlayMode;
         }
 
         private void PlayingStateOnSceneDuplicating()
@@ -464,8 +511,14 @@ namespace FlaxEditor.Windows
         /// <inheritdoc />
         public override void OnPlayEnd()
         {
+            IsFloating = false;
             IsMaximized = false;
+            IsBorderless = false;
             Cursor = CursorType.Default;
+            Screen.CursorLock = CursorLockMode.None;
+            if (Screen.MainWindow.IsMouseTracking)
+                Screen.MainWindow.EndTrackingMouse();
+            RootControl.GameRoot.EndMouseCapture();
         }
 
         /// <inheritdoc />
@@ -474,7 +527,7 @@ namespace FlaxEditor.Windows
             base.OnMouseLeave();
 
             // Remove focus from game window when mouse moves out and the cursor is hidden during game
-            if ((IsFocused || ContainsFocus) && Parent != null && Editor.IsPlayMode && !Screen.CursorVisible)
+            if (ContainsFocus && Parent != null && Editor.IsPlayMode && !Screen.CursorVisible && Screen.CursorLock == CursorLockMode.None)
             {
                 Parent.Focus();
             }
@@ -484,6 +537,21 @@ namespace FlaxEditor.Windows
         public override void OnShowContextMenu(ContextMenu menu)
         {
             base.OnShowContextMenu(menu);
+
+            // Focus on play
+            {
+                var pfMenu = menu.AddChildMenu("Focus On Play Override").ContextMenu;
+
+                GenerateFocusOptionsContextMenu(pfMenu);
+
+                pfMenu.AddSeparator();
+
+                var button = pfMenu.AddButton("Remove override");
+                button.TooltipText = "Reset the override to the value set in the editor options.";
+                button.Clicked += () => FocusOnPlayOption = Editor.Instance.Options.Options.Interface.FocusOnPlayMode;
+            }
+
+            menu.AddSeparator();
 
             // Viewport Brightness
             {
@@ -535,14 +603,14 @@ namespace FlaxEditor.Windows
                     });
                     _defaultViewportScaling.Add(new ViewportScaleOptions
                     {
-                        Label = "1920x1080 Resolution",
+                        Label = "1920x1080 Resolution (Full HD)",
                         ScaleType = ViewportScaleType.Resolution,
                         Size = new Int2(1920, 1080),
                         Active = false,
                     });
                     _defaultViewportScaling.Add(new ViewportScaleOptions
                     {
-                        Label = "2560x1440 Resolution",
+                        Label = "2560x1440 Resolution (2K)",
                         ScaleType = ViewportScaleType.Resolution,
                         Size = new Int2(2560, 1440),
                         Active = false,
@@ -580,6 +648,40 @@ namespace FlaxEditor.Windows
 
             menu.MinimumWidth = 200;
             menu.AddSeparator();
+        }
+
+        private void GenerateFocusOptionsContextMenu(ContextMenu pfMenu)
+        {
+            foreach (PlayModeFocusOptions f in _focusOptions)
+            {
+                f.Active = f.FocusOption == FocusOnPlayOption;
+
+                var button = pfMenu.AddButton(f.Name);
+                button.CloseMenuOnClick = false;
+                button.Tag = f;
+                button.TooltipText = f.Tooltip;
+                button.Icon = f.Active ? Style.Current.CheckBoxTick : SpriteHandle.Invalid;
+                button.Clicked += () =>
+                {
+                    foreach (var child in pfMenu.Items)
+                    {
+                        if (child is ContextMenuButton cmb && cmb.Tag is PlayModeFocusOptions p)
+                        {
+                            if (cmb == button)
+                            {
+                                p.Active = true;
+                                button.Icon = Style.Current.CheckBoxTick;
+                                FocusOnPlayOption = p.FocusOption;
+                            }
+                            else if (p.Active)
+                            {
+                                cmb.Icon = SpriteHandle.Invalid;
+                                p.Active = false;
+                            }
+                        }
+                    }
+                };
+            }
         }
 
         private void CreateViewportSizingContextMenu(ContextMenu vsMenu)
@@ -830,29 +932,6 @@ namespace FlaxEditor.Windows
                 Render2D.DrawText(style.FontLarge, "No camera", new Rectangle(Float2.Zero, Size), style.ForegroundDisabled, TextAlignment.Center, TextAlignment.Center);
             }
 
-            // Selected UI controls outline
-            bool drawAnySelectedControl = false;
-            // TODO: optimize this (eg. cache list of selected UIControl's when selection gets changed)
-            var selection = Editor.SceneEditing.Selection;
-            for (var i = 0; i < selection.Count; i++)
-            {
-                if (selection[i].EditableObject is UIControl controlActor && controlActor && controlActor.Control != null)
-                {
-                    if (!drawAnySelectedControl)
-                    {
-                        drawAnySelectedControl = true;
-                        Render2D.PushTransform(ref _viewport._cachedTransform);
-                    }
-                    var options = Editor.Options.Options.Visual;
-                    var control = controlActor.Control;
-                    var bounds = control.EditorBounds;
-                    bounds = Rectangle.FromPoints(control.PointToParent(_viewport, bounds.Location), control.PointToParent(_viewport, bounds.Size));
-                    Render2D.DrawRectangle(bounds, options.SelectionOutlineColor0, options.UISelectionOutlineSize);
-                }
-            }
-            if (drawAnySelectedControl)
-                Render2D.PopTransform();
-
             // Play mode hints and overlay
             if (Editor.StateMachine.IsPlayMode)
             {
@@ -865,7 +944,7 @@ namespace FlaxEditor.Windows
                 {
                     var alpha = Mathf.Saturate(-animTime / fadeOutTime);
                     var rect = new Rectangle(new Float2(6), Size - 12);
-                    var text = "Press Shift+F11 to unlock the mouse";
+                    var text = $"Press {Editor.Options.Options.Input.DebuggerUnlockMouse} to unlock the mouse";
                     Render2D.DrawText(style.FontSmall, text, rect + new Float2(1.0f), style.Background * alpha, TextAlignment.Near, TextAlignment.Far);
                     Render2D.DrawText(style.FontSmall, text, rect, style.Foreground * alpha, TextAlignment.Near, TextAlignment.Far);
                 }
@@ -876,7 +955,7 @@ namespace FlaxEditor.Windows
                 if (animTime < 0)
                 {
                     float alpha = Mathf.Saturate(-animTime / fadeOutTime);
-                    Render2D.DrawRectangle(new Rectangle(new Float2(4), Size - 8), Color.Orange * alpha);
+                    Render2D.DrawRectangle(new Rectangle(new Float2(4), Size - 8), style.SelectionBorder * alpha);
                 }
 
                 // Add overlay during debugger breakpoint hang
@@ -928,6 +1007,29 @@ namespace FlaxEditor.Windows
                 RootWindow?.Window?.Focus();
             }
             Focus();
+        }
+
+        /// <summary>
+        /// Apply the selected window mode to the game window.
+        /// </summary>
+        /// <param name="mode"></param>
+        public void SetWindowMode(InterfaceOptions.GameWindowMode mode)
+        {
+            switch (mode)
+            {
+            case InterfaceOptions.GameWindowMode.Docked:
+                break;
+            case InterfaceOptions.GameWindowMode.PopupWindow:
+                IsFloating = true;
+                break;
+            case InterfaceOptions.GameWindowMode.MaximizedWindow:
+                IsMaximized = true;
+                break;
+            case InterfaceOptions.GameWindowMode.BorderlessWindow:
+                IsBorderless = true;
+                break;
+            default: throw new ArgumentOutOfRangeException(nameof(mode), mode, null);
+            }
         }
 
         /// <summary>

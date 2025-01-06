@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System.Collections.Generic;
 using FlaxEditor.CustomEditors.Editors;
@@ -36,6 +36,8 @@ namespace FlaxEditor.CustomEditors.Dedicated
                 base.SpawnProperty(itemLayout, itemValues, item);
                 return;
             }
+
+            EvaluateVisibleIf(itemLayout, item, GetLabelIndex(itemLayout, item));
 
             // Add labels with a check box
             var label = new CheckablePropertyNameLabel(item.DisplayName);

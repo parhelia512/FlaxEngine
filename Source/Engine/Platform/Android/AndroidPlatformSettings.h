@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -23,24 +23,24 @@ API_CLASS(sealed, Namespace="FlaxEditor.Content.Settings") class FLAXENGINE_API 
     API_ENUM() enum class FLAXENGINE_API ScreenOrientation
     {
         /// <summary>
-        /// "portrait" mode
+        /// "userPortrait" mode
         /// </summary>
         Portrait,
 
         /// <summary>
-        /// "reversePortrait" mode
+        /// "userLandscape" mode
         /// </summary>
-        PortraitReverse,
+        Landscape,
 
         /// <summary>
-        /// "landscape" mode
+        /// "sensorPortrait" mode
         /// </summary>
-        LandscapeRight,
+        SensorPortrait,
 
         /// <summary>
-        /// "reverseLandscape" mode
+        /// "sensorLandscape" mode
         /// </summary>
-        LandscapeLeft,
+        SensorLandscape,
 
         /// <summary>
         /// "fullSensor" mode
@@ -49,10 +49,46 @@ API_CLASS(sealed, Namespace="FlaxEditor.Content.Settings") class FLAXENGINE_API 
     };
 
     /// <summary>
+    /// The output textures quality (compression).
+    /// </summary>
+    API_ENUM() enum class TextureQuality
+    {
+        // Raw image data without any compression algorithm. Mostly for testing or compatibility.
+        Uncompressed,
+        // ASTC 4x4 block compression.
+        API_ENUM(Attributes="EditorDisplay(null, \"ASTC High\")")
+        ASTC_High,
+        // ASTC 6x6 block compression.
+        API_ENUM(Attributes="EditorDisplay(null, \"ASTC Medium\")")
+        ASTC_Medium,
+        // ASTC 8x8 block compression.
+        API_ENUM(Attributes="EditorDisplay(null, \"ASTC Low\")")
+        ASTC_Low,
+    };
+
+    /// <summary>
     /// The application package name (eg. com.company.product). Custom tokens: ${PROJECT_NAME}, ${COMPANY_NAME}.
     /// </summary>
     API_FIELD(Attributes="EditorOrder(0), EditorDisplay(\"General\")")
     String PackageName = TEXT("com.${COMPANY_NAME}.${PROJECT_NAME}");
+
+    /// <summary>
+    /// The application version code (eg. 1, 12, 123).
+    /// </summary>
+    API_FIELD(Attributes="EditorOrder(10), EditorDisplay(\"General\")")
+    String VersionCode = TEXT("1");
+
+    /// <summary>
+    /// The minimum Android API level (eg. 20, 28, 34).
+    /// </summary>
+    API_FIELD(Attributes = "EditorOrder(20), EditorDisplay(\"General\")")
+    String MinimumAPILevel = TEXT("23");
+
+    /// <summary>
+    /// The target Android API level (eg. 20, 28, 34).
+    /// </summary>
+    API_FIELD(Attributes = "EditorOrder(30), EditorDisplay(\"General\")")
+    String TargetAPILevel = TEXT("33");
 
     /// <summary>
     /// The application permissions list (eg. android.media.action.IMAGE_CAPTURE). Added to the generated manifest file.
@@ -65,6 +101,12 @@ API_CLASS(sealed, Namespace="FlaxEditor.Content.Settings") class FLAXENGINE_API 
     /// </summary>
     API_FIELD(Attributes = "EditorOrder(110), EditorDisplay(\"General\")")
     ScreenOrientation DefaultOrientation = ScreenOrientation::AutoRotation;
+
+    /// <summary>
+    /// The output textures quality (compression).
+    /// </summary>
+    API_FIELD(Attributes="EditorOrder(500), EditorDisplay(\"General\")")
+    TextureQuality TexturesQuality = TextureQuality::ASTC_Medium;
 
     /// <summary>
     /// Custom icon texture to use for the application (overrides the default one).

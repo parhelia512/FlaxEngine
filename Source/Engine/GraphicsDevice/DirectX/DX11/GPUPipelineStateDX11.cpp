@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if GRAPHICS_API_DIRECTX11
 
@@ -6,11 +6,16 @@
 
 void GPUPipelineStateDX11::OnReleaseGPU()
 {
+    DepthStencilState = nullptr;
     BlendState = nullptr;
     VS = nullptr;
+#if GPU_ALLOW_TESSELLATION_SHADERS
     HS = nullptr;
     DS = nullptr;
+#endif
+#if GPU_ALLOW_GEOMETRY_SHADERS
     GS = nullptr;
+#endif
     PS = nullptr;
 }
 
@@ -30,9 +35,13 @@ bool GPUPipelineStateDX11::Init(const Description& desc)
 
     // Cache shaders
     VS = (GPUShaderProgramVSDX11*)desc.VS;
+#if GPU_ALLOW_TESSELLATION_SHADERS
     HS = desc.HS ? (GPUShaderProgramHSDX11*)desc.HS : nullptr;
     DS = desc.DS ? (GPUShaderProgramDSDX11*)desc.DS : nullptr;
+#endif
+#if GPU_ALLOW_GEOMETRY_SHADERS
     GS = desc.GS ? (GPUShaderProgramGSDX11*)desc.GS : nullptr;
+#endif
     PS = desc.PS ? (GPUShaderProgramPSDX11*)desc.PS : nullptr;
 
     // Primitive Topology
@@ -44,12 +53,14 @@ bool GPUPipelineStateDX11::Init(const Description& desc)
         D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
     };
     PrimitiveTopology = D3D11_primTypes[static_cast<int32>(desc.PrimitiveTopology)];
+#if GPU_ALLOW_TESSELLATION_SHADERS
     if (HS)
         PrimitiveTopology = (D3D11_PRIMITIVE_TOPOLOGY)((int32)D3D11_PRIMITIVE_TOPOLOGY_1_CONTROL_POINT_PATCHLIST + (HS->GetControlPointsCount() - 1));
+#endif
 
     // States
-    DepthStencilStateIndex = static_cast<int32>(desc.DepthFunc) + (desc.DepthEnable ? 0 : 9) + (desc.DepthWriteEnable ? 0 : 18);
     RasterizerStateIndex = static_cast<int32>(desc.CullMode) + (desc.Wireframe ? 0 : 3) + (desc.DepthClipEnable ? 0 : 6);
+    DepthStencilState = _device->GetDepthStencilState(&desc);
     BlendState = _device->GetBlendState(desc.BlendMode);
 
     // Calculate approx. memory usage (just to set sth)

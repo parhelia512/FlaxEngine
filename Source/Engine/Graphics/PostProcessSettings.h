@@ -1,12 +1,12 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
 #include "Engine/Core/Math/Vector3.h"
 #include "Engine/Core/Math/Vector4.h"
+#include "Engine/Core/ISerializable.h"
 #include "Engine/Content/AssetReference.h"
 #include "Engine/Content/SoftAssetReference.h"
-#include "Engine/Core/ISerializable.h"
 #include "Engine/Content/Assets/Texture.h"
 #include "Engine/Content/Assets/MaterialBase.h"
 
@@ -52,6 +52,11 @@ API_ENUM() enum class ToneMappingMode
     /// The ACES Filmic reference tonemapper (approximation).
     /// </summary>
     ACES = 2,
+
+    /// <summary>
+    /// The AGX tonemapper.
+    /// </summary>
+    AGX = 3,
 };
 
 /// <summary>
@@ -358,7 +363,7 @@ API_STRUCT() struct FLAXENGINE_API GlobalIlluminationSettings : ISerializable
     float BounceIntensity = 1.0f;
 
     /// <summary>
-    /// Defines how quickly GI blends between the the current frame and the history buffer. Lower values update GI faster, but with more jittering and noise. If the camera in your game doesn't move much, we recommend values closer to 1.
+    /// Defines how quickly GI blends between the current frame and the history buffer. Lower values update GI faster, but with more jittering and noise. If the camera in your game doesn't move much, we recommend values closer to 1.
     /// </summary>
     API_FIELD(Attributes="EditorOrder(20), Limit(0, 1), PostProcessSetting((int)GlobalIlluminationSettingsOverride.TemporalResponse)")
     float TemporalResponse = 0.9f;
@@ -526,13 +531,13 @@ API_STRUCT() struct FLAXENGINE_API ToneMappingSettings : ISerializable
     ToneMappingSettingsOverride OverrideFlags = Override::None;
 
     /// <summary>
-    /// Adjusts the white balance in relation to the temperature of the light in the scene. When the light temperature and this one match the light will appear white. When a value is used that is higher than the light in the scene it will yield a "warm" or yellow color, and, conversely, if the value is lower, it would yield a "cool" or blue color. The default value is `6500`.
+    /// Adjusts the white balance in relation to the temperature of the light in the scene. When the light temperature and this one match the light will appear white. When a value is used that is higher than the light in the scene it will yield a "warm" or yellow color, and, conversely, if the value is lower, it would yield a "cool" or blue color.
     /// </summary>
     API_FIELD(Attributes="Limit(1500, 15000), EditorOrder(0), PostProcessSetting((int)ToneMappingSettingsOverride.WhiteTemperature)")
     float WhiteTemperature = 6500.0f;
 
     /// <summary>
-    /// Adjusts the white balance temperature tint for the scene by adjusting the cyan and magenta color ranges. Ideally, this setting should be used once you've adjusted the white balance temperature to get accurate colors. Under some light temperatures, the colors may appear to be more yellow or blue. This can be used to balance the resulting color to look more natural. The default value is `0`.
+    /// Adjusts the white balance temperature tint for the scene by adjusting the cyan and magenta color ranges. Ideally, this setting should be used once you've adjusted the white balance temperature to get accurate colors. Under some light temperatures, the colors may appear to be more yellow or blue. This can be used to balance the resulting color to look more natural.
     /// </summary>
     API_FIELD(Attributes="Limit(-1, 1, 0.001f), EditorOrder(1), PostProcessSetting((int)ToneMappingSettingsOverride.WhiteTint)")
     float WhiteTint = 0.0f;
@@ -960,7 +965,7 @@ API_STRUCT() struct FLAXENGINE_API EyeAdaptationSettings : ISerializable
     /// The speed at which the exposure changes when the scene brightness moves from a bright area to a dark area (brightness goes down).
     /// </summary>
     API_FIELD(Attributes="Limit(0, 100.0f, 0.01f), EditorOrder(2), PostProcessSetting((int)EyeAdaptationSettingsOverride.SpeedDown)")
-    float SpeedDown = 1.0f;
+    float SpeedDown = 10.0f;
 
     /// <summary>
     /// The pre-exposure value applied to the scene color before performing post-processing (such as bloom, lens flares, etc.).
@@ -984,7 +989,7 @@ API_STRUCT() struct FLAXENGINE_API EyeAdaptationSettings : ISerializable
     /// The maximum brightness for the auto exposure which limits the upper brightness the eye can adapt within.
     /// </summary>
     API_FIELD(Attributes="Limit(0, 100.0f, 0.01f), EditorOrder(6), PostProcessSetting((int)EyeAdaptationSettingsOverride.MaxBrightness), EditorDisplay(null, \"Maximum Brightness\")")
-    float MaxBrightness = 2.0f;
+    float MaxBrightness = 15.0f;
 
     /// <summary>
     /// The lower bound for the luminance histogram of the scene color. This value is in percent and limits the pixels below this brightness. Use values in the range of 60-80. Used only in AutomaticHistogram mode.
@@ -996,7 +1001,7 @@ API_STRUCT() struct FLAXENGINE_API EyeAdaptationSettings : ISerializable
     /// The upper bound for the luminance histogram of the scene color. This value is in percent and limits the pixels above this brightness. Use values in the range of 80-95. Used only in AutomaticHistogram mode.
     /// </summary>
     API_FIELD(Attributes="Limit(1, 99, 0.001f), EditorOrder(3), PostProcessSetting((int)EyeAdaptationSettingsOverride.HistogramHighPercent)")
-    float HistogramHighPercent = 98.0f;
+    float HistogramHighPercent = 90.0f;
 
 public:
     /// <summary>
@@ -1079,10 +1084,10 @@ API_STRUCT() struct FLAXENGINE_API CameraArtifactsSettings : ISerializable
     CameraArtifactsSettingsOverride OverrideFlags = Override::None;
 
     /// <summary>
-    /// Strength of the vignette effect. Value 0 hides it. The default value is 0.8.
+    /// Strength of the vignette effect. Value 0 hides it.
     /// </summary>
     API_FIELD(Attributes="Limit(0, 2, 0.001f), EditorOrder(0), PostProcessSetting((int)CameraArtifactsSettingsOverride.VignetteIntensity)")
-    float VignetteIntensity = 0.8f;
+    float VignetteIntensity = 0.4f;
 
     /// <summary>
     /// Color of the vignette.
@@ -1091,19 +1096,19 @@ API_STRUCT() struct FLAXENGINE_API CameraArtifactsSettings : ISerializable
     Float3 VignetteColor = Float3(0, 0, 0.001f);
 
     /// <summary>
-    /// Controls the shape of the vignette. Values near 0 produce a rectangular shape. Higher values result in a rounder shape. The default value is 0.125.
+    /// Controls the shape of the vignette. Values near 0 produce a rectangular shape. Higher values result in a rounder shape.
     /// </summary>
     API_FIELD(Attributes="Limit(0.0001f, 2.0f, 0.001f), EditorOrder(2), PostProcessSetting((int)CameraArtifactsSettingsOverride.VignetteShapeFactor)")
     float VignetteShapeFactor = 0.125f;
 
     /// <summary>
-    /// Intensity of the grain filter. A value of 0 hides it. The default value is 0.005.
+    /// Intensity of the grain filter. A value of 0 hides it.
     /// </summary>
     API_FIELD(Attributes="Limit(0.0f, 2.0f, 0.005f), EditorOrder(3), PostProcessSetting((int)CameraArtifactsSettingsOverride.GrainAmount)")
     float GrainAmount = 0.006f;
 
     /// <summary>
-    /// Size of the grain particles. The default value is 1.6.
+    /// Size of the grain particles.
     /// </summary>
     API_FIELD(Attributes="Limit(1.0f, 3.0f, 0.01f), EditorOrder(4), PostProcessSetting((int)CameraArtifactsSettingsOverride.GrainParticleSize)")
     float GrainParticleSize = 1.6f;
@@ -1230,25 +1235,25 @@ API_STRUCT() struct FLAXENGINE_API LensFlaresSettings : ISerializable
     /// Strength of the effect. A value of 0 disables it.
     /// </summary>
     API_FIELD(Attributes="Limit(0, 10.0f, 0.01f), EditorOrder(0), PostProcessSetting((int)LensFlaresSettingsOverride.Intensity)")
-    float Intensity = 1.0f;
+    float Intensity = 0.5f;
 
     /// <summary>
     /// Amount of lens flares ghosts.
     /// </summary>
     API_FIELD(Attributes="Limit(0, 16), EditorOrder(1), PostProcessSetting((int)LensFlaresSettingsOverride.Ghosts)")
-    int32 Ghosts = 8;
+    int32 Ghosts = 4;
 
     /// <summary>
     /// Lens flares halo width.
     /// </summary>
     API_FIELD(Attributes="EditorOrder(2), PostProcessSetting((int)LensFlaresSettingsOverride.HaloWidth)")
-    float HaloWidth = 0.16f;
+    float HaloWidth = 0.04f;
 
     /// <summary>
     /// Lens flares halo intensity.
     /// </summary>
     API_FIELD(Attributes="Limit(0, 10.0f, 0.01f), EditorOrder(3), PostProcessSetting((int)LensFlaresSettingsOverride.HaloIntensity)")
-    float HaloIntensity = 0.666f;
+    float HaloIntensity = 0.5f;
 
     /// <summary>
     /// Ghost samples dispersal parameter.
@@ -1584,7 +1589,7 @@ API_STRUCT() struct FLAXENGINE_API MotionBlurSettings : ISerializable
     /// The blur effect strength. A value of 0 disables it, while higher values increase the effect.
     /// </summary>
     API_FIELD(Attributes="Limit(0, 5, 0.01f), EditorOrder(1), PostProcessSetting((int)MotionBlurSettingsOverride.Scale)")
-    float Scale = 1.0f;
+    float Scale = 0.5f;
 
     /// <summary>
     /// The amount of sample points used during motion blur rendering. It affects blur quality and performance.
@@ -1731,49 +1736,49 @@ API_STRUCT() struct FLAXENGINE_API ScreenSpaceReflectionsSettings : ISerializabl
     ReflectionsTraceMode TraceMode = ReflectionsTraceMode::ScreenTracing;
 
     /// <summary>
-    /// The depth buffer downscale option to optimize raycast performance. Full gives better quality, but half improves performance. The default value is half.
+    /// The depth buffer downscale option to optimize raycast performance. Full gives better quality, but half improves performance.
     /// </summary>
     API_FIELD(Attributes="EditorOrder(2), PostProcessSetting((int)ScreenSpaceReflectionsSettingsOverride.DepthResolution)")
     ResolutionMode DepthResolution = ResolutionMode::Half;
 
     /// <summary>
-    /// The raycast resolution. Full gives better quality, but half improves performance. The default value is half.
+    /// The raycast resolution. Full gives better quality, but half improves performance.
     /// </summary>
     API_FIELD(Attributes="EditorOrder(3), PostProcessSetting((int)ScreenSpaceReflectionsSettingsOverride.RayTracePassResolution)")
     ResolutionMode RayTracePassResolution = ResolutionMode::Half;
 
     /// <summary>
-    /// The reflection spread parameter. This value controls source roughness effect on reflections blur. Smaller values produce wider reflections spread but also introduce more noise. Higher values provide more mirror-like reflections. Default value is 0.82.
+    /// The reflection spread parameter. This value controls source roughness effect on reflections blur. Smaller values produce wider reflections spread but also introduce more noise. Higher values provide more mirror-like reflections.
     /// </summary>
     API_FIELD(Attributes="Limit(0, 1.0f, 0.01f), EditorOrder(10), PostProcessSetting((int)ScreenSpaceReflectionsSettingsOverride.BRDFBias), EditorDisplay(null, \"BRDF Bias\")")
     float BRDFBias = 0.82f;
 
     /// <summary>
-    /// The maximum amount of roughness a material must have to reflect the scene. For example, if this value is set to 0.4, only materials with a roughness value of 0.4 or below reflect the scene. The default value is 0.45.
+    /// The maximum amount of roughness a material must have to reflect the scene. For example, if this value is set to 0.4, only materials with a roughness value of 0.4 or below reflect the scene.
     /// </summary>
     API_FIELD(Attributes="Limit(0, 1.0f, 0.01f), EditorOrder(15), PostProcessSetting((int)ScreenSpaceReflectionsSettingsOverride.RoughnessThreshold)")
     float RoughnessThreshold = 0.45f;
 
     /// <summary>
-    /// The offset of the raycast origin. Lower values produce more correct reflection placement, but produce more artifacts. We recommend values of 0.3 or lower. The default value is 0.1.
+    /// The offset of the raycast origin. Lower values produce more correct reflection placement, but produce more artifacts. We recommend values of 0.3 or lower.
     /// </summary>
     API_FIELD(Attributes="Limit(0, 10.0f, 0.01f), EditorOrder(20), PostProcessSetting((int)ScreenSpaceReflectionsSettingsOverride.WorldAntiSelfOcclusionBias)")
     float WorldAntiSelfOcclusionBias = 0.1f;
 
     /// <summary>
-    /// The raycast resolution. Full gives better quality, but half improves performance. The default value is half.
+    /// The raycast resolution. Full gives better quality, but half improves performance.
     /// </summary>
     API_FIELD(Attributes="EditorOrder(25), PostProcessSetting((int)ScreenSpaceReflectionsSettingsOverride.ResolvePassResolution)")
     ResolutionMode ResolvePassResolution = ResolutionMode::Full;
 
     /// <summary>
-    /// The number of rays used to resolve the reflection color. Higher values provide better quality but reduce effect performance. Default value is 4. Use 1 for the highest speed.
+    /// The number of rays used to resolve the reflection color. Higher values provide better quality but reduce effect performance. Use value of 1 for the best performance at cost of quality.
     /// </summary>
     API_FIELD(Attributes="Limit(1, 8), EditorOrder(26), PostProcessSetting((int)ScreenSpaceReflectionsSettingsOverride.ResolveSamples)")
     int32 ResolveSamples = 4;
 
     /// <summary>
-    /// The point at which the far edges of the reflection begin to fade. Has no effect on performance. The default value is 0.1.
+    /// The point at which the far edges of the reflection begin to fade. Has no effect on performance.
     /// </summary>
     API_FIELD(Attributes="Limit(0, 1.0f, 0.02f), EditorOrder(30), PostProcessSetting((int)ScreenSpaceReflectionsSettingsOverride.EdgeFadeFactor)")
     float EdgeFadeFactor = 0.1f;
@@ -1803,13 +1808,13 @@ API_STRUCT() struct FLAXENGINE_API ScreenSpaceReflectionsSettings : ISerializabl
     bool TemporalEffect = true;
 
     /// <summary>
-    /// The intensity of the temporal effect. Lower values produce reflections faster, but more noise. The default value is 8.
+    /// The intensity of the temporal effect. Lower values produce reflections faster, but more noise.
     /// </summary>
     API_FIELD(Attributes="Limit(0, 20.0f, 0.5f), EditorOrder(55), PostProcessSetting((int)ScreenSpaceReflectionsSettingsOverride.TemporalScale)")
     float TemporalScale = 8.0f;
 
     /// <summary>
-    /// Defines how quickly reflections blend between the reflection in the current frame and the history buffer. Lower values produce reflections faster, but with more jittering. If the camera in your game doesn't move much, we recommend values closer to 1. The default value is 0.8.
+    /// Defines how quickly reflections blend between the reflection in the current frame and the history buffer. Lower values produce reflections faster, but with more jittering. If the camera in your game doesn't move much, we recommend values closer to 1.
     /// </summary>
     API_FIELD(Attributes="Limit(0.05f, 1.0f, 0.01f), EditorOrder(60), PostProcessSetting((int)ScreenSpaceReflectionsSettingsOverride.TemporalResponse)")
     float TemporalResponse = 0.8f;
@@ -1859,9 +1864,29 @@ API_ENUM(Attributes="Flags") enum class AntiAliasingSettingsOverride : int32
     TAA_MotionBlending = 1 << 4,
 
     /// <summary>
+    /// Overrides <see cref="AntiAliasingSettings.CAS_SharpeningAmount"/> property.
+    /// </summary>
+    CAS_SharpeningAmount = 1 << 5,
+
+    /// <summary>
+    /// Overrides <see cref="AntiAliasingSettings.CAS_EdgeSharpening"/> property.
+    /// </summary>
+    CAS_EdgeSharpening = 1 << 6,
+
+    /// <summary>
+    /// Overrides <see cref="AntiAliasingSettings.CAS_MinEdgeThreshold"/> property.
+    /// </summary>
+    CAS_MinEdgeThreshold = 1 << 7,
+
+    /// <summary>
+    /// Overrides <see cref="AntiAliasingSettings.CAS_OverBlurLimit"/> property.
+    /// </summary>
+    CAS_OverBlurLimit = 1 << 8,
+
+    /// <summary>
     /// All properties.
     /// </summary>
-    All = Mode | TAA_JitterSpread | TAA_Sharpness | TAA_StationaryBlending | TAA_MotionBlending,
+    All = Mode | TAA_JitterSpread | TAA_Sharpness | TAA_StationaryBlending | TAA_MotionBlending | CAS_SharpeningAmount | CAS_EdgeSharpening | CAS_MinEdgeThreshold | CAS_OverBlurLimit,
 };
 
 /// <summary>
@@ -1888,26 +1913,50 @@ API_STRUCT() struct FLAXENGINE_API AntiAliasingSettings : ISerializable
     /// <summary>
     /// The diameter (in texels) inside which jitter samples are spread. Smaller values result in crisper but more aliased output, while larger values result in more stable but blurrier output.
     /// </summary>
-    API_FIELD(Attributes="Limit(0.1f, 1f, 0.001f), EditorOrder(1), PostProcessSetting((int)AntiAliasingSettingsOverride.TAA_JitterSpread), EditorDisplay(null, \"TAA Jitter Spread\")")
-    float TAA_JitterSpread = 0.75f;
+    API_FIELD(Attributes="Limit(0.1f, 1f, 0.001f), EditorOrder(1), PostProcessSetting((int)AntiAliasingSettingsOverride.TAA_JitterSpread), EditorDisplay(null, \"TAA Jitter Spread\"), VisibleIf(nameof(ShowTAASettings))")
+    float TAA_JitterSpread = 1.0f;
 
     /// <summary>
     /// Controls the amount of sharpening applied to the color buffer. TAA can induce a slight loss of details in high frequency regions. Sharpening alleviates this issue. High values may introduce dark-border artifacts.
     /// </summary>
-    API_FIELD(Attributes="Limit(0, 3f, 0.001f), EditorOrder(2), PostProcessSetting((int)AntiAliasingSettingsOverride.TAA_Sharpness), EditorDisplay(null, \"TAA Sharpness\")")
-    float TAA_Sharpness = 0.0f;
+    API_FIELD(Attributes="Limit(0, 3f, 0.001f), EditorOrder(2), PostProcessSetting((int)AntiAliasingSettingsOverride.TAA_Sharpness), EditorDisplay(null, \"TAA Sharpness\"), VisibleIf(nameof(ShowTAASettings))")
+    float TAA_Sharpness = 0.1f;
 
     /// <summary>
     /// The blend coefficient for stationary fragments. Controls the percentage of history samples blended into the final color for fragments with minimal active motion.
     /// </summary>
-    API_FIELD(Attributes="Limit(0, 0.99f, 0.001f), EditorOrder(3), PostProcessSetting((int)AntiAliasingSettingsOverride.TAA_StationaryBlending), EditorDisplay(null, \"TAA Stationary Blending\")")
+    API_FIELD(Attributes="Limit(0, 0.99f, 0.001f), EditorOrder(3), PostProcessSetting((int)AntiAliasingSettingsOverride.TAA_StationaryBlending), EditorDisplay(null, \"TAA Stationary Blending\"), VisibleIf(nameof(ShowTAASettings))")
     float TAA_StationaryBlending = 0.95f;
 
     /// <summary>
     /// The blending coefficient for moving fragments. Controls the percentage of history samples blended into the final color for fragments with significant active motion.
     /// </summary>
-    API_FIELD(Attributes="Limit(0, 0.99f, 0.001f), EditorOrder(4), PostProcessSetting((int)AntiAliasingSettingsOverride.TAA_MotionBlending), EditorDisplay(null, \"TAA Motion Blending\")")
-    float TAA_MotionBlending = 0.7f;
+    API_FIELD(Attributes="Limit(0, 0.99f, 0.001f), EditorOrder(4), PostProcessSetting((int)AntiAliasingSettingsOverride.TAA_MotionBlending), EditorDisplay(null, \"TAA Motion Blending\"), VisibleIf(nameof(ShowTAASettings))")
+    float TAA_MotionBlending = 0.85f;
+
+    /// <summary>
+    /// The sharpening strength for the Contrast Adaptive Sharpening (CAS) pass. Ignored when using TAA that contains own contrast filter.
+    /// </summary>
+    API_FIELD(Attributes = "Limit(0, 10f, 0.001f), EditorOrder(10), PostProcessSetting((int)AntiAliasingSettingsOverride.CAS_SharpeningAmount), EditorDisplay(null, \"CAS Sharpening Amount\"), VisibleIf(nameof(ShowTAASettings), true)")
+    float CAS_SharpeningAmount = 0.0f;
+
+    /// <summary>
+    /// The edge sharpening strength for the Contrast Adaptive Sharpening (CAS) pass. Ignored when using TAA that contains own contrast filter.
+    /// </summary>
+    API_FIELD(Attributes = "Limit(0, 10f, 0.001f), EditorOrder(11), PostProcessSetting((int)AntiAliasingSettingsOverride.CAS_EdgeSharpening), EditorDisplay(null, \"CAS Edge Sharpening\"), VisibleIf(nameof(ShowTAASettings), true)")
+    float CAS_EdgeSharpening = 0.5f;
+
+    /// <summary>
+    /// The minimum edge threshold for the Contrast Adaptive Sharpening (CAS) pass. Ignored when using TAA that contains own contrast filter.
+    /// </summary>
+    API_FIELD(Attributes = "Limit(0, 10f, 0.001f), EditorOrder(12), PostProcessSetting((int)AntiAliasingSettingsOverride.CAS_MinEdgeThreshold), EditorDisplay(null, \"CAS Min Edge Threshold\"), VisibleIf(nameof(ShowTAASettings), true)")
+    float CAS_MinEdgeThreshold = 0.03f;
+
+    /// <summary>
+    /// The over-blur limit for the Contrast Adaptive Sharpening (CAS) pass. Ignored when using TAA that contains own contrast filter.
+    /// </summary>
+    API_FIELD(Attributes = "Limit(0, 100f, 0.001f), EditorOrder(13), PostProcessSetting((int)AntiAliasingSettingsOverride.CAS_OverBlurLimit), EditorDisplay(null, \"CAS Over-blur Limit\"), VisibleIf(nameof(ShowTAASettings), true)")
+    float CAS_OverBlurLimit = 1.0f;
 
 public:
     /// <summary>
@@ -1929,8 +1978,8 @@ API_STRUCT() struct FLAXENGINE_API PostFxMaterialsSettings : ISerializable
     /// <summary>
     /// The post-process materials collection for rendering (fixed capacity).
     /// </summary>
-    API_FIELD(Attributes="EditorDisplay(null, EditorDisplayAttribute.InlineStyle)")
-    Array<AssetReference<MaterialBase>, FixedAllocation<POST_PROCESS_SETTINGS_MAX_MATERIALS>> Materials;
+    API_FIELD(Attributes="EditorDisplay(null, EditorDisplayAttribute.InlineStyle), Collection(MaxCount=8)")
+    Array<SoftAssetReference<MaterialBase>, FixedAllocation<POST_PROCESS_SETTINGS_MAX_MATERIALS>> Materials;
 
 public:
     /// <summary>
@@ -2015,7 +2064,7 @@ API_STRUCT() struct FLAXENGINE_API PostProcessSettings : ISerializable
     ScreenSpaceReflectionsSettings ScreenSpaceReflections;
 
     /// <summary>
-    /// The anti-aliasing effect settings.
+    /// The antialiasing effect settings.
     /// </summary>
     API_FIELD(Attributes="EditorDisplay(\"Anti Aliasing\"), EditorOrder(1100), JsonProperty(\"AA\")")
     AntiAliasingSettings AntiAliasing;

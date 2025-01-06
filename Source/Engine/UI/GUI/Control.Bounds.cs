@@ -1,6 +1,7 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
+using System.ComponentModel;
 
 namespace FlaxEngine.GUI
 {
@@ -233,6 +234,11 @@ namespace FlaxEngine.GUI
                 if (_bounds.Size.Equals(ref value))
                     return;
                 var bounds = new Rectangle(_bounds.Location, value);
+                if (_pivotRelativeSizing)
+                {
+                    var delta = _bounds.Size - value;
+                    bounds.Location += delta * Pivot;
+                }
                 SetBounds(ref bounds);
             }
         }
@@ -382,6 +388,7 @@ namespace FlaxEngine.GUI
         /// <summary>
         /// Gets or sets the shear transform angles (x, y). Defined in degrees. Shearing happens relative to the control pivot point.
         /// </summary>
+        [DefaultValue(typeof(Float2), "0,0")]
         [ExpandGroups, EditorDisplay("Transform"), EditorOrder(1040), Tooltip("The shear transform angles (x, y). Defined in degrees. Shearing happens relative to the control pivot point.")]
         public Float2 Shear
         {
@@ -398,6 +405,7 @@ namespace FlaxEngine.GUI
         /// <summary>
         /// Gets or sets the rotation angle (in degrees). Control is rotated around it's pivot point (middle of the control by default).
         /// </summary>
+        [DefaultValue(0.0f)]
         [ExpandGroups, EditorDisplay("Transform"), EditorOrder(1050), Tooltip("The control rotation angle (in degrees). Control is rotated around it's pivot point (middle of the control by default).")]
         public float Rotation
         {
@@ -563,7 +571,7 @@ namespace FlaxEngine.GUI
         }
 
         /// <summary>
-        /// Sets the anchor preset for the control. Can be use to auto-place the control for a given preset or can preserve the current control bounds.
+        /// Sets the anchor preset for the control. Can be used to auto-place the control for a given preset or can preserve the current control bounds.
         /// </summary>
         /// <param name="anchorPreset">The anchor preset to set.</param>
         /// <param name="preserveBounds">True if preserve current control bounds, otherwise will align control position accordingly to the anchor location.</param>

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -6,7 +6,7 @@
 #include "Engine/Scripting/ScriptingType.h"
 #include "Types.h"
 
-template<typename T, int32 MaxThreads, bool ClearMemory>
+template<typename T, int32 MaxThreads>
 class ThreadLocal;
 
 /// <summary>
@@ -45,6 +45,36 @@ public:
     static Delegate<> ScriptsReloaded;
 
 public:
+    /// <summary>
+    /// Occurs on scripting update.
+    /// </summary>
+    static Delegate<> Update;
+
+    /// <summary>
+    /// Occurs on scripting late update.
+    /// </summary>
+    static Delegate<> LateUpdate;
+
+    /// <summary>
+    /// Occurs on scripting fixed update.
+    /// </summary>
+    static Delegate<> FixedUpdate;
+
+    /// <summary>
+    /// Occurs on scripting late fixed update.
+    /// </summary>
+    static Delegate<> LateFixedUpdate;
+
+    /// <summary>
+    /// Occurs on scripting draw update. Called during frame rendering and can be used to invoke custom rendering with GPUDevice.
+    /// </summary>
+    static Delegate<> Draw;
+
+    /// <summary>
+    /// Occurs when scripting engine is disposing. Engine is during closing and some services may be unavailable (eg. loading scenes). This may be called after the engine fatal error event.
+    /// </summary>
+    static Delegate<> Exit;
+public:
 
     /// <summary>
     /// Gets the root domain.
@@ -78,6 +108,13 @@ public:
 #endif
 
 public:
+
+    /// <summary>
+    /// Gets all registered scripting objects.
+    /// </summary>
+    /// <remarks>Use with caution due to potentially large memory allocation.</remarks>
+    /// <returns>The collection of the objects.</returns>
+    static Array<ScriptingObject*, HeapAllocation> GetObjects();
 
     /// <summary>
     /// Finds the class with given fully qualified name within whole assembly.
@@ -114,7 +151,7 @@ public:
     /// <summary>
     /// The objects lookup identifier mapping used to override the object ids on FindObject call (used by the object references deserialization).
     /// </summary>
-    static ThreadLocal<IdsMappingTable*, PLATFORM_THREADS_LIMIT, true> ObjectsLookupIdMapping;
+    static ThreadLocal<IdsMappingTable*, PLATFORM_THREADS_LIMIT> ObjectsLookupIdMapping;
 
     /// <summary>
     /// Finds the object by the given identifier. Searches registered scene objects and optionally assets. Logs warning if fails.
@@ -133,14 +170,14 @@ public:
     /// <param name="id">The object unique identifier.</param>
     /// <param name="type">The type of the object to find (optional).</param>
     /// <returns>The found object or null if missing.</returns>
-    static ScriptingObject* FindObject(Guid id, MClass* type = nullptr);
+    static ScriptingObject* FindObject(Guid id, const MClass* type = nullptr);
 
     /// <summary>
     /// Tries to find the object by the given class.
     /// </summary>
     /// <param name="type">The type of the object to find.</param>
     /// <returns>The found object or null if missing.</returns>
-    static ScriptingObject* TryFindObject(MClass* type);
+    static ScriptingObject* TryFindObject(const MClass* type);
 
     /// <summary>
     /// Tries to find the object by the given identifier.
@@ -159,7 +196,7 @@ public:
     /// <param name="id">The object unique identifier.</param>
     /// <param name="type">The type of the object to find (optional).</param>
     /// <returns>The found object or null if missing.</returns>
-    static ScriptingObject* TryFindObject(Guid id, MClass* type = nullptr);
+    static ScriptingObject* TryFindObject(Guid id, const MClass* type = nullptr);
 
     /// <summary>
     /// Finds the object by the given managed instance handle. Searches only registered scene objects.
@@ -189,7 +226,7 @@ public:
     /// <summary>
     /// Returns true if given type is from one of the game scripts assemblies.
     /// </summary>
-    static bool IsTypeFromGameScripts(MClass* type);
+    static bool IsTypeFromGameScripts(const MClass* type);
 
     static void ProcessBuildInfoPath(String& path, const String& projectFolderPath);
 

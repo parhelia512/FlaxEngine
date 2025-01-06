@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -81,6 +81,7 @@ namespace FlaxEngine.GUI
         // Style
 
         private Color _backgroundColor = Color.Transparent;
+        private IBrush _backgroundBrush = null;
 
         // Tooltip
 
@@ -172,6 +173,25 @@ namespace FlaxEngine.GUI
         {
             get => _backgroundColor;
             set => _backgroundColor = value;
+        }
+
+        /// <summary>
+        /// Gets or sets control background brush used to fill the contents. Uses Background Color property as tint color.
+        /// </summary>
+        [EditorDisplay("Background Style"), EditorOrder(2001)]
+        public IBrush BackgroundBrush
+        {
+            get => _backgroundBrush;
+            set
+            {
+                _backgroundBrush = value;
+
+#if FLAX_EDITOR
+                // Auto-reset background color so brush is visible as it uses it for tint
+                if (value != null && _backgroundColor == Color.Transparent && FlaxEditor.CustomEditors.CustomEditor.IsSettingValue)
+                    _backgroundColor = Color.White;
+#endif
+            }
         }
 
         /// <summary>
@@ -416,9 +436,14 @@ namespace FlaxEngine.GUI
         public virtual void Draw()
         {
             // Paint Background
-            if (_backgroundColor.A > 0.0f)
+            var rect = new Rectangle(Float2.Zero, _bounds.Size);
+            if (BackgroundBrush != null)
             {
-                Render2D.FillRectangle(new Rectangle(Float2.Zero, Size), _backgroundColor);
+                BackgroundBrush.Draw(rect, _backgroundColor);
+            }
+            else if (_backgroundColor.A > 0.0f)
+            {
+                Render2D.FillRectangle(rect, _backgroundColor);
             }
         }
 
@@ -614,6 +639,18 @@ namespace FlaxEngine.GUI
             case NavDirection.Down: return NavTargetDown;
             case NavDirection.Left: return NavTargetLeft;
             case NavDirection.Right: return NavTargetRight;
+            case NavDirection.Next:
+                if (NavTargetRight != null)
+                    return NavTargetRight;
+                if (NavTargetDown != null)
+                    return NavTargetDown;
+                return null;
+            case NavDirection.Previous:
+                if (NavTargetLeft != null)
+                    return NavTargetLeft;
+                if (NavTargetUp != null)
+                    return NavTargetUp;
+                return null;
             default: return null;
             }
         }
@@ -1089,6 +1126,23 @@ namespace FlaxEngine.GUI
         #region Helper Functions
 
         /// <summary>
+        /// Performs a raycast against UI controls hierarchy to find any intersecting control content. Uses <see cref="ContainsPoint"/> with precise check (skips transparent surfaces and empty panels).
+        /// </summary>
+        /// <param name="location">The position to intersect UI with.</param>
+        /// <param name="hit">The result control that intersects with the raycast.</param>
+        /// <returns>True if ray hits any matching control, otherwise false.</returns>
+        public virtual bool RayCast(ref Float2 location, out Control hit)
+        {
+            if (ContainsPoint(ref location, true))
+            {
+                hit = this;
+                return true;
+            }
+            hit = null;
+            return false;
+        }
+
+        /// <summary>
         /// Checks if given location point in Parent Space intersects with the control content and calculates local position.
         /// </summary>
         /// <param name="locationParent">The location in Parent Space.</param>
@@ -1101,11 +1155,12 @@ namespace FlaxEngine.GUI
         }
 
         /// <summary>
-        /// Checks if control contains given point in local Control Space.
+        /// Checks if this control contains given point in local Control Space.
         /// </summary>
         /// <param name="location">Point location in Control Space to check</param>
+        /// <param name="precise">True if perform precise intersection test against the control content (eg. with hit mask or transparency threshold). Otherwise, only simple bounds-check will be performed.</param>
         /// <returns>True if point is inside control's area, otherwise false.</returns>
-        public virtual bool ContainsPoint(ref Float2 location)
+        public virtual bool ContainsPoint(ref Float2 location, bool precise = false)
         {
             return location.X >= 0 &&
                    location.Y >= 0 &&
@@ -1123,12 +1178,10 @@ namespace FlaxEngine.GUI
         {
             if (parent == null)
                 throw new ArgumentNullException();
-
             Control c = this;
             while (c != null)
             {
                 location = c.PointToParent(ref location);
-
                 c = c.Parent;
                 if (c == parent)
                     break;

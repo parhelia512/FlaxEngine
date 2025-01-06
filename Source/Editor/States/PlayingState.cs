@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -77,7 +77,6 @@ namespace FlaxEditor.States
             {
                 if (!IsActive)
                     throw new InvalidOperationException();
-
                 Time.GamePaused = value;
             }
         }
@@ -163,6 +162,8 @@ namespace FlaxEditor.States
             Editor.OnPlayBegin();
             IsPlayModeStarting = false;
             Profiler.EndEvent();
+
+            Time.Synchronize();
         }
 
         private void SetupEditorEnvOptions()
@@ -192,7 +193,7 @@ namespace FlaxEditor.States
 
             // Restore editor scene
             SceneRestoring?.Invoke();
-            _duplicateScenes.DeletedScenes();
+            _duplicateScenes.UnloadScenes();
             PluginManager.Internal_DeinitializeGamePlugins();
             Editor.Internal_SetPlayMode(false);
             _duplicateScenes.RestoreSceneData();
@@ -209,6 +210,8 @@ namespace FlaxEditor.States
             Editor.OnPlayEnd();
             IsPlayModeEnding = false;
             Profiler.EndEvent();
+
+            Time.Synchronize();
         }
     }
 }

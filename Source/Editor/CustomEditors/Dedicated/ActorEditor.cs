@@ -1,7 +1,8 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using FlaxEditor.Actions;
 using FlaxEditor.CustomEditors.Editors;
 using FlaxEditor.CustomEditors.Elements;
@@ -9,6 +10,8 @@ using FlaxEditor.GUI;
 using FlaxEditor.GUI.ContextMenu;
 using FlaxEditor.GUI.Tree;
 using FlaxEditor.Scripting;
+using FlaxEditor.Windows;
+using FlaxEditor.Windows.Assets;
 using FlaxEngine;
 using FlaxEngine.GUI;
 using FlaxEngine.Json;
@@ -64,19 +67,35 @@ namespace FlaxEditor.CustomEditors.Dedicated
                         // Use default prefab instance as a reference for the editor
                         Values.SetReferenceValue(prefabInstance);
 
-                        // Add some UI
-                        var panel = layout.CustomContainer<UniformGridPanel>();
-                        panel.CustomControl.Height = 20.0f;
-                        panel.CustomControl.SlotsVertically = 1;
-                        panel.CustomControl.SlotsHorizontally = 2;
+                        if (Presenter == Editor.Instance.Windows.PropertiesWin.Presenter)
+                        {
+                            // Add some UI
+                            var panel = layout.CustomContainer<UniformGridPanel>();
+                            panel.CustomControl.Height = 20.0f;
+                            panel.CustomControl.SlotsVertically = 1;
+                            panel.CustomControl.SlotsHorizontally = 3;
+                            
+                            // Selecting actor prefab asset
+                            var selectPrefab = panel.Button("Select Prefab");
+                            selectPrefab.Button.Clicked += () =>
+                            {
+                                Editor.Instance.Windows.ContentWin.ClearItemsSearch();
+                                Editor.Instance.Windows.ContentWin.Select(prefab);
+                            };
 
-                        // Selecting actor prefab asset
-                        var selectPrefab = panel.Button("Select Prefab");
-                        selectPrefab.Button.Clicked += () => Editor.Instance.Windows.ContentWin.Select(prefab);
+                            // Edit selected prefab asset
+                            var editPrefab = panel.Button("Edit Prefab");
+                            editPrefab.Button.Clicked += () =>
+                            {
+                                Editor.Instance.Windows.ContentWin.ClearItemsSearch();
+                                Editor.Instance.Windows.ContentWin.Select(prefab);
+                                Editor.Instance.Windows.ContentWin.Open(Editor.Instance.Windows.ContentWin.View.Selection[0]);
+                            };
 
-                        // Viewing changes applied to this actor
-                        var viewChanges = panel.Button("View Changes");
-                        viewChanges.Button.Clicked += () => ViewChanges(viewChanges.Button, new Float2(0.0f, 20.0f));
+                            // Viewing changes applied to this actor
+                            var viewChanges = panel.Button("View Changes");
+                            viewChanges.Button.Clicked += () => ViewChanges(viewChanges.Button, new Float2(0.0f, 20.0f));
+                        }
 
                         // Link event to update editor on prefab apply
                         _linkedPrefabId = prefab.ID;
@@ -111,6 +130,38 @@ namespace FlaxEditor.CustomEditors.Dedicated
             var actor = (Actor)Values[0];
             var scriptType = TypeUtils.GetType(actor.TypeName);
             var item = scriptType.ContentItem;
+            if (Presenter.Owner is PropertiesWindow propertiesWindow)
+            {
+                var lockButton = cm.AddButton(propertiesWindow.LockObjects ? "Unlock" : "Lock");
+                lockButton.ButtonClicked += button =>
+                {
+                    propertiesWindow.LockObjects = !propertiesWindow.LockObjects;
+
+                    // Reselect current selection
+                    if (!propertiesWindow.LockObjects && Editor.Instance.SceneEditing.SelectionCount > 0)
+                    {
+                        var cachedSelection = Editor.Instance.SceneEditing.Selection.ToArray();
+                        Editor.Instance.SceneEditing.Select(null);
+                        Editor.Instance.SceneEditing.Select(cachedSelection);
+                    }
+                };
+            }
+            else if (Presenter.Owner is PrefabWindow prefabWindow)
+            {
+                var lockButton = cm.AddButton(prefabWindow.LockSelectedObjects ? "Unlock" : "Lock");
+                lockButton.ButtonClicked += button =>
+                {
+                    prefabWindow.LockSelectedObjects = !prefabWindow.LockSelectedObjects;
+
+                    // Reselect current selection
+                    if (!prefabWindow.LockSelectedObjects && prefabWindow.Selection.Count > 0)
+                    {
+                        var cachedSelection = prefabWindow.Selection.ToList();
+                        prefabWindow.Select(null);
+                        prefabWindow.Select(cachedSelection);
+                    }
+                };
+            }
             cm.AddButton("Copy ID", OnClickCopyId);
             cm.AddButton("Edit actor type", OnClickEditActorType).Enabled = item != null;
             var showButton = cm.AddButton("Show in content window", OnClickShowActorType);
@@ -164,7 +215,7 @@ namespace FlaxEditor.CustomEditors.Dedicated
                 //Presenter.BuildLayoutOnUpdate();
 
                 // Better way is to just update the reference value using the new default instance of the prefab, created after changes apply
-                if (prefab && !prefab.WaitForLoaded())
+                if (Values != null && prefab && !prefab.WaitForLoaded())
                 {
                     var actor = (Actor)Values[0];
                     var prefabObjectId = actor.PrefabObjectID;
@@ -245,9 +296,7 @@ namespace FlaxEditor.CustomEditors.Dedicated
         {
             // Special case for new Script added to actor
             if (editor.Values[0] is Script script && !script.HasPrefabLink)
-            {
                 return CreateDiffNode(editor);
-            }
 
             // Skip if no change detected
             var isRefEdited = editor.Values.IsReferenceValueModified;
@@ -258,9 +307,16 @@ namespace FlaxEditor.CustomEditors.Dedicated
             if (editor.ChildrenEditors.Count == 0 || (isRefEdited && editor is CollectionEditor))
                 result = CreateDiffNode(editor);
             bool isScriptEditorWithRefValue = editor is ScriptsEditor && editor.Values.HasReferenceValue;
+            bool isActorEditorInLevel = editor is ActorEditor && editor.Values[0] is Actor actor && actor.IsPrefabRoot && actor.HasScene;
             for (int i = 0; i < editor.ChildrenEditors.Count; i++)
             {
-                var child = ProcessDiff(editor.ChildrenEditors[i], !isScriptEditorWithRefValue);
+                var childEditor = editor.ChildrenEditors[i];
+
+                // Special case for root actor transformation (can be applied only in Prefab editor, not in Level)
+                if (isActorEditorInLevel && childEditor.Values.Info.Name is "LocalPosition" or "LocalOrientation" or "LocalScale")
+                    continue;
+
+                var child = ProcessDiff(childEditor, !isScriptEditorWithRefValue);
                 if (child != null)
                 {
                     if (result == null)
@@ -276,7 +332,6 @@ namespace FlaxEditor.CustomEditors.Dedicated
                 {
                     var prefabObjectScript = prefabObjectScripts[j];
                     bool isRemoved = true;
-
                     for (int i = 0; i < editor.ChildrenEditors.Count; i++)
                     {
                         if (editor.ChildrenEditors[i].Values is ScriptsEditor.ScriptsContainer container && container.PrefabObjectId == prefabObjectScript.PrefabObjectID)
@@ -286,14 +341,12 @@ namespace FlaxEditor.CustomEditors.Dedicated
                             break;
                         }
                     }
-
                     if (isRemoved)
                     {
                         var dummy = new RemovedScriptDummy
                         {
                             PrefabObject = prefabObjectScript
                         };
-
                         var child = CreateDiffNode(dummy);
                         if (result == null)
                             result = CreateDiffNode(editor);

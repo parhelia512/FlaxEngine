@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 // -----------------------------------------------------------------------------
 // Original code from SharpDX project. https://github.com/sharpdx/SharpDX/
@@ -56,13 +56,7 @@ using System.Runtime.InteropServices;
 
 namespace FlaxEngine
 {
-    /// <summary>
-    /// Represents a 3x3 Matrix ( contains only Scale and Rotation ).
-    /// </summary>
-    [Serializable]
-    [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    // ReSharper disable once InconsistentNaming
-    public struct Matrix3x3 : IEquatable<Matrix3x3>, IFormattable
+    partial struct Matrix3x3 : IEquatable<Matrix3x3>, IFormattable
     {
         /// <summary>
         /// The size of the <see cref="Matrix3x3"/> type, in bytes.
@@ -135,9 +129,7 @@ namespace FlaxEngine
         /// <param name="value">The value that will be assigned to all components.</param>
         public Matrix3x3(float value)
         {
-            M11 = M12 = M13 =
-                        M21 = M22 = M23 =
-                                    M31 = M32 = M33 = value;
+            M11 = M12 = M13 = M21 = M22 = M23 = M31 = M32 = M33 = value;
         }
 
         /// <summary>
@@ -191,6 +183,23 @@ namespace FlaxEngine
             M31 = values[6];
             M32 = values[7];
             M33 = values[8];
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="Matrix3x3" /> struct.
+        /// </summary>
+        /// <param name="m">The rotation/scale matrix.</param>
+        public Matrix3x3(Matrix m)
+        {
+            M11 = m.M11;
+            M12 = m.M12;
+            M13 = m.M13;
+            M21 = m.M21;
+            M22 = m.M22;
+            M23 = m.M23;
+            M31 = m.M31;
+            M32 = m.M32;
+            M33 = m.M33;
         }
 
         /// <summary>
@@ -294,9 +303,6 @@ namespace FlaxEngine
         /// <summary>
         /// Gets a value indicating whether this instance is an identity Matrix3x3.
         /// </summary>
-        /// <value>
-        /// <c>true</c> if this instance is an identity Matrix3x3; otherwise, <c>false</c>.
-        /// </value>
         public bool IsIdentity => Equals(Identity);
 
         /// <summary>
@@ -557,19 +563,19 @@ namespace FlaxEngine
         /// </remarks>
         public bool DecomposeUniformScale(out float scale, out Quaternion rotation)
         {
-            //Scaling is the length of the rows. ( just take one row since this is a uniform matrix)
+            // Scaling is the length of the rows. ( just take one row since this is a uniform matrix)
             scale = (float)Math.Sqrt((M11 * M11) + (M12 * M12) + (M13 * M13));
             var invScale = 1f / scale;
 
-            //If any of the scaling factors are zero, then the rotation matrix can not exist.
+            // If any of the scaling factors are zero, then the rotation matrix can not exist
             if (Math.Abs(scale) < Mathf.Epsilon)
             {
                 rotation = Quaternion.Identity;
                 return false;
             }
 
-            //The rotation is the left over matrix after dividing out the scaling.
-            Matrix3x3 rotationmatrix = new Matrix3x3
+            // The rotation is the leftover matrix after dividing out the scaling
+            var rotationMatrix = new Matrix3x3
             {
                 M11 = M11 * invScale,
                 M12 = M12 * invScale,
@@ -581,8 +587,7 @@ namespace FlaxEngine
                 M32 = M32 * invScale,
                 M33 = M33 * invScale
             };
-
-            Quaternion.RotationMatrix(ref rotationmatrix, out rotation);
+            Quaternion.RotationMatrix(ref rotationMatrix, out rotation);
             return true;
         }
 

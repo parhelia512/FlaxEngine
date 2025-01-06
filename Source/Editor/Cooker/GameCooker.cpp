@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "GameCooker.h"
 #include "PlatformTools.h"
@@ -148,6 +148,8 @@ const Char* ToString(const BuildPlatform platform)
         return TEXT("Mac ARM64");
     case BuildPlatform::iOSARM64:
         return TEXT("iOS ARM64");
+    case BuildPlatform::WindowsARM64:
+        return TEXT("Windows ARM64");
     default:
         return TEXT("");
     }
@@ -200,13 +202,6 @@ bool CookingData::AssetTypeStatistics::operator<(const AssetTypeStatistics& othe
     if (ContentSize != other.ContentSize)
         return ContentSize > other.ContentSize;
     return Count > other.Count;
-}
-
-CookingData::Statistics::Statistics()
-{
-    TotalAssets = 0;
-    CookedAssets = 0;
-    ContentSizeMB = 0;
 }
 
 CookingData::CookingData(const SpawnParams& params)
@@ -307,6 +302,10 @@ void CookingData::GetBuildPlatformName(const Char*& platform, const Char*& archi
         platform = TEXT("iOS");
         architecture = TEXT("ARM64");
         break;
+    case BuildPlatform::WindowsARM64:
+        platform = TEXT("Windows");
+        architecture = TEXT("ARM64");
+        break;
     default:
         LOG(Fatal, "Unknown or unsupported build platform.");
     }
@@ -393,6 +392,9 @@ PlatformTools* GameCooker::GetTools(BuildPlatform platform)
         case BuildPlatform::Windows64:
             result = New<WindowsPlatformTools>(ArchitectureType::x64);
             break;
+        case BuildPlatform::WindowsARM64:
+            result = New<WindowsPlatformTools>(ArchitectureType::ARM64);
+            break;
 #endif
 #if PLATFORM_TOOLS_UWP
         case BuildPlatform::UWPx86:
@@ -456,18 +458,18 @@ PlatformTools* GameCooker::GetTools(BuildPlatform platform)
     return result;
 }
 
-void GameCooker::Build(BuildPlatform platform, BuildConfiguration configuration, const StringView& outputPath, BuildOptions options, const Array<String>& customDefines, const StringView& preset, const StringView& presetTarget)
+bool GameCooker::Build(BuildPlatform platform, BuildConfiguration configuration, const StringView& outputPath, BuildOptions options, const Array<String>& customDefines, const StringView& preset, const StringView& presetTarget)
 {
     if (IsRunning())
     {
         LOG(Warning, "Cannot start a build. Already running.");
-        return;
+        return true;
     }
     PlatformTools* tools = GetTools(platform);
     if (tools == nullptr)
     {
         LOG(Error, "Build platform {0} is not supported.", ::ToString(platform));
-        return;
+        return true;
     }
 
     // Setup
@@ -493,7 +495,7 @@ void GameCooker::Build(BuildPlatform platform, BuildConfiguration configuration,
         if (FileSystem::CreateDirectory(data.CacheDirectory))
         {
             LOG(Error, "Cannot setup game building cache directory.");
-            return;
+            return true;
         }
     }
 
@@ -510,13 +512,15 @@ void GameCooker::Build(BuildPlatform platform, BuildConfiguration configuration,
         {
             GameCookerImpl::IsRunning = false;
             LOG(Error, "Failed to start a build thread.");
-            return;
+            return true;
         }
     }
     else
     {
         ThreadCond.NotifyOne();
     }
+
+    return false;
 }
 
 void GameCooker::Cancel(bool waitForEnd)
@@ -552,7 +556,12 @@ void GameCooker::GetCurrentPlatform(PlatformType& platform, BuildPlatform& build
     switch (PLATFORM_TYPE)
     {
     case PlatformType::Windows:
-        buildPlatform = PLATFORM_64BITS ? BuildPlatform::Windows64 : BuildPlatform::Windows32;
+        if (PLATFORM_ARCH == ArchitectureType::x64)
+            buildPlatform = BuildPlatform::Windows64;
+        else if (PLATFORM_ARCH == ArchitectureType::ARM64)
+            buildPlatform = BuildPlatform::WindowsARM64;
+        else
+            buildPlatform = BuildPlatform::Windows32;
         break;
     case PlatformType::XboxOne:
         buildPlatform = BuildPlatform::XboxOne;

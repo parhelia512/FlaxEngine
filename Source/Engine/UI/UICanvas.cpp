@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "UICanvas.h"
 #include "Engine/Scripting/ManagedCLR/MException.h"
@@ -12,13 +12,12 @@
 #else
 // Cached methods (FlaxEngine.CSharp.dll is loaded only once)
 MMethod* UICanvas_Serialize = nullptr;
-MMethod* UICanvas_SerializeDiff = nullptr;
 MMethod* UICanvas_Deserialize = nullptr;
 MMethod* UICanvas_PostDeserialize = nullptr;
 MMethod* UICanvas_Enable = nullptr;
 MMethod* UICanvas_Disable = nullptr;
 #if USE_EDITOR
-MMethod* UICanvas_OnActiveInTreeChanged = nullptr;
+MMethod* UICanvas_ActiveInTreeChanged = nullptr;
 #endif
 MMethod* UICanvas_EndPlay = nullptr;
 MMethod* UICanvas_ParentChanged = nullptr;
@@ -45,17 +44,16 @@ UICanvas::UICanvas(const SpawnParams& params)
     if (UICanvas_Serialize == nullptr)
     {
         MClass* mclass = GetClass();
-        UICanvas_SerializeDiff = mclass->GetMethod("SerializeDiff", 1);
         UICanvas_Deserialize = mclass->GetMethod("Deserialize", 1);
         UICanvas_PostDeserialize = mclass->GetMethod("PostDeserialize");
         UICanvas_Enable = mclass->GetMethod("Enable");
         UICanvas_Disable = mclass->GetMethod("Disable");
 #if USE_EDITOR
-        UICanvas_OnActiveInTreeChanged = mclass->GetMethod("OnActiveInTreeChanged");
+        UICanvas_ActiveInTreeChanged = mclass->GetMethod("ActiveInTreeChanged");
 #endif
         UICanvas_EndPlay = mclass->GetMethod("EndPlay");
         UICanvas_ParentChanged = mclass->GetMethod("ParentChanged");
-        UICanvas_Serialize = mclass->GetMethod("Serialize");
+        UICanvas_Serialize = mclass->GetMethod("Serialize", 1);
         Platform::MemoryBarrier();
     }
 #endif
@@ -83,8 +81,7 @@ void UICanvas::Serialize(SerializeStream& stream, const void* otherObj)
     void* params[1];
     params[0] = other ? other->GetOrCreateManagedInstance() : nullptr;
     MObject* exception = nullptr;
-    auto method = other ? UICanvas_SerializeDiff : UICanvas_Serialize;
-    auto invokeResultStr = (MString*)method->Invoke(GetOrCreateManagedInstance(), params, &exception);
+    auto invokeResultStr = (MString*)UICanvas_Serialize->Invoke(GetOrCreateManagedInstance(), params, &exception);
     if (exception)
     {
         MException ex(exception);
@@ -185,7 +182,7 @@ void UICanvas::OnTransformChanged()
 
 void UICanvas::OnActiveInTreeChanged()
 {
-    UICANVAS_INVOKE(OnActiveInTreeChanged);
+    UICANVAS_INVOKE(ActiveInTreeChanged);
 
     // Base
     Actor::OnActiveInTreeChanged();

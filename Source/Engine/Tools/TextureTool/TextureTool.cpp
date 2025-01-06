@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if COMPILE_WITH_TEXTURE_TOOL
 
@@ -15,6 +15,7 @@
 #include "Engine/Scripting/Enums.h"
 #include "Engine/Graphics/Textures/TextureData.h"
 #include "Engine/Graphics/PixelFormatExtensions.h"
+#include "Engine/Profiler/ProfilerCPU.h"
 
 #if USE_EDITOR
 #include "Engine/Core/Collections/Dictionary.h"
@@ -72,11 +73,20 @@ void TextureTool::Options::Serialize(SerializeStream& stream, const void* otherO
     stream.JKEY("FlipY");
     stream.Bool(FlipY);
 
+    stream.JKEY("FlipX");
+    stream.Bool(FlipX);
+
     stream.JKEY("InvertGreenChannel");
     stream.Bool(InvertGreenChannel);
 
+    stream.JKEY("ReconstructZChannel");
+    stream.Bool(ReconstructZChannel);
+
     stream.JKEY("Resize");
     stream.Bool(Resize);
+
+    stream.JKEY("KeepAspectRatio");
+    stream.Bool(KeepAspectRatio);
 
     stream.JKEY("PreserveAlphaCoverage");
     stream.Bool(PreserveAlphaCoverage);
@@ -132,8 +142,11 @@ void TextureTool::Options::Deserialize(DeserializeStream& stream, ISerializeModi
     sRGB = JsonTools::GetBool(stream, "sRGB", sRGB);
     GenerateMipMaps = JsonTools::GetBool(stream, "GenerateMipMaps", GenerateMipMaps);
     FlipY = JsonTools::GetBool(stream, "FlipY", FlipY);
+    FlipX = JsonTools::GetBool(stream, "FlipX", FlipX);
     InvertGreenChannel = JsonTools::GetBool(stream, "InvertGreenChannel", InvertGreenChannel);
+    ReconstructZChannel = JsonTools::GetBool(stream, "ReconstructZChannel", ReconstructZChannel);
     Resize = JsonTools::GetBool(stream, "Resize", Resize);
+    KeepAspectRatio = JsonTools::GetBool(stream, "KeepAspectRatio", KeepAspectRatio);
     PreserveAlphaCoverage = JsonTools::GetBool(stream, "PreserveAlphaCoverage", PreserveAlphaCoverage);
     PreserveAlphaCoverageReference = JsonTools::GetFloat(stream, "PreserveAlphaCoverageReference", PreserveAlphaCoverageReference);
     TextureGroup = JsonTools::GetInt(stream, "TextureGroup", TextureGroup);
@@ -183,6 +196,7 @@ bool TextureTool::HasAlpha(const StringView& path)
 
 bool TextureTool::ImportTexture(const StringView& path, TextureData& textureData)
 {
+    PROFILE_CPU();
     LOG(Info, "Importing texture from \'{0}\'", path);
     const auto startTime = DateTime::NowUTC();
 
@@ -219,6 +233,7 @@ bool TextureTool::ImportTexture(const StringView& path, TextureData& textureData
 
 bool TextureTool::ImportTexture(const StringView& path, TextureData& textureData, Options options, String& errorMsg)
 {
+    PROFILE_CPU();
     LOG(Info, "Importing texture from \'{0}\'. Options: {1}", path, options.ToString());
     const auto startTime = DateTime::NowUTC();
 
@@ -267,9 +282,9 @@ bool TextureTool::ImportTexture(const StringView& path, TextureData& textureData
 
 bool TextureTool::ExportTexture(const StringView& path, const TextureData& textureData)
 {
+    PROFILE_CPU();
     LOG(Info, "Exporting texture to \'{0}\'.", path);
     const auto startTime = DateTime::NowUTC();
-
     ImageType type;
     if (GetImageType(path, type))
         return true;
@@ -279,7 +294,6 @@ bool TextureTool::ExportTexture(const StringView& path, const TextureData& textu
         return true;
     }
 
-    // Export
 #if COMPILE_WITH_DIRECTXTEX
     const auto failed = ExportTextureDirectXTex(type, path, textureData);
 #elif COMPILE_WITH_STB
@@ -303,7 +317,6 @@ bool TextureTool::ExportTexture(const StringView& path, const TextureData& textu
 
 bool TextureTool::Convert(TextureData& dst, const TextureData& src, const PixelFormat dstFormat)
 {
-    // Validate input
     if (src.GetMipLevels() == 0)
     {
         LOG(Warning, "Missing source data.");
@@ -319,6 +332,7 @@ bool TextureTool::Convert(TextureData& dst, const TextureData& src, const PixelF
         LOG(Warning, "Converting volume texture data is not supported.");
         return true;
     }
+    PROFILE_CPU();
 
 #if COMPILE_WITH_DIRECTXTEX
     return ConvertDirectXTex(dst, src, dstFormat);
@@ -332,7 +346,6 @@ bool TextureTool::Convert(TextureData& dst, const TextureData& src, const PixelF
 
 bool TextureTool::Resize(TextureData& dst, const TextureData& src, int32 dstWidth, int32 dstHeight)
 {
-    // Validate input
     if (src.GetMipLevels() == 0)
     {
         LOG(Warning, "Missing source data.");
@@ -348,7 +361,7 @@ bool TextureTool::Resize(TextureData& dst, const TextureData& src, int32 dstWidt
         LOG(Warning, "Resizing volume texture data is not supported.");
         return true;
     }
-
+    PROFILE_CPU();
 #if COMPILE_WITH_DIRECTXTEX
     return ResizeDirectXTex(dst, src, dstWidth, dstHeight);
 #elif COMPILE_WITH_STB
@@ -766,12 +779,43 @@ bool TextureTool::GetImageType(const StringView& path, ImageType& type)
     {
         type = ImageType::RAW;
     }
+    else if (extension == TEXT("exr"))
+    {
+        type = ImageType::EXR;
+    }
     else
     {
         LOG(Warning, "Unknown file type.");
         return true;
     }
 
+    return false;
+}
+
+bool TextureTool::Transform(TextureData& texture, const Function<void(Color&)>& transformation)
+{   
+    PROFILE_CPU();
+    auto sampler = TextureTool::GetSampler(texture.Format);
+    if (!sampler)
+        return true;
+    for (auto& slice : texture.Items)
+    {
+        for (int32 mipIndex = 0; mipIndex < slice.Mips.Count(); mipIndex++)
+        {
+            auto& mip = slice.Mips[mipIndex];
+            auto mipWidth = Math::Max(texture.Width >> mipIndex, 1);
+            auto mipHeight = Math::Max(texture.Height >> mipIndex, 1);
+            for (int32 y = 0; y < mipHeight; y++)
+            {
+                for (int32 x = 0; x < mipWidth; x++)
+                {    
+                    Color color = TextureTool::SamplePoint(sampler, x, y, mip.Data.Get(), mip.RowPitch);
+                    transformation(color);
+                    TextureTool::Store(sampler, x, y, mip.Data.Get(), mip.RowPitch, color);
+                }
+            }
+        }
+    }
     return false;
 }
 

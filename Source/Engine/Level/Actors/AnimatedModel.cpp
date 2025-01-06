@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "AnimatedModel.h"
 #include "BoneSocket.h"
@@ -7,6 +7,8 @@
 #include "Engine/Animations/Animations.h"
 #include "Engine/Engine/Engine.h"
 #if USE_EDITOR
+#include "Engine/Core/Math/OrientedBoundingBox.h"
+#include "Engine/Core/Math/Matrix3x3.h"
 #include "Editor/Editor.h"
 #endif
 #include "Engine/Graphics/GPUContext.h"
@@ -53,10 +55,10 @@ void AnimatedModel::UpdateAnimation()
         || !IsActiveInHierarchy()
         || SkinnedModel == nullptr
         || !SkinnedModel->IsLoaded()
-        || _lastUpdateFrame == Engine::FrameCount
+        || _lastUpdateFrame == Engine::UpdateCount
         || _masterPose)
         return;
-    _lastUpdateFrame = Engine::FrameCount;
+    _lastUpdateFrame = Engine::UpdateCount;
 
     if (AnimationGraph && AnimationGraph->IsLoaded() && AnimationGraph->Graph.IsReady())
     {
@@ -111,7 +113,7 @@ void AnimatedModel::PreInitSkinningData()
     for (int32 boneIndex = 0; boneIndex < bonesCount; boneIndex++)
     {
         auto& bone = skeleton.Bones[boneIndex];
-        identityMatrices[boneIndex] = bone.OffsetMatrix * GraphInstance.NodesPose[bone.NodeIndex];
+        identityMatrices.Get()[boneIndex] = bone.OffsetMatrix * GraphInstance.NodesPose[bone.NodeIndex];
     }
     _skinningData.SetData(identityMatrices.Get(), true);
 
@@ -127,7 +129,7 @@ void AnimatedModel::GetCurrentPose(Array<Matrix>& nodesTransformation, bool worl
     if (worldSpace)
     {
         Matrix world;
-        _transform.GetWorld(world);
+        GetLocalToWorldMatrix(world);
         for (auto& m : nodesTransformation)
             m = m * world;
     }
@@ -142,7 +144,7 @@ void AnimatedModel::SetCurrentPose(const Array<Matrix>& nodesTransformation, boo
     if (worldSpace)
     {
         Matrix world;
-        _transform.GetWorld(world);
+        GetLocalToWorldMatrix(world);
         Matrix invWorld;
         Matrix::Invert(world, invWorld);
         for (auto& m : GraphInstance.NodesPose)
@@ -162,7 +164,7 @@ void AnimatedModel::GetNodeTransformation(int32 nodeIndex, Matrix& nodeTransform
     if (worldSpace)
     {
         Matrix world;
-        _transform.GetWorld(world);
+        GetLocalToWorldMatrix(world);
         nodeTransformation = nodeTransformation * world;
     }
 }
@@ -181,7 +183,7 @@ void AnimatedModel::SetNodeTransformation(int32 nodeIndex, const Matrix& nodeTra
     if (worldSpace)
     {
         Matrix world;
-        _transform.GetWorld(world);
+        GetLocalToWorldMatrix(world);
         Matrix invWorld;
         Matrix::Invert(world, invWorld);
         GraphInstance.NodesPose[nodeIndex] = GraphInstance.NodesPose[nodeIndex] * invWorld;
@@ -271,7 +273,7 @@ AnimGraphParameter* AnimatedModel::GetParameter(const StringView& name)
     return nullptr;
 }
 
-Variant AnimatedModel::GetParameterValue(const StringView& name)
+const Variant& AnimatedModel::GetParameterValue(const StringView& name) const
 {
     CHECK_ANIM_GRAPH_PARAM_ACCESS_RESULT(Variant::Null);
     for (auto& param : GraphInstance.Parameters)
@@ -297,7 +299,7 @@ void AnimatedModel::SetParameterValue(const StringView& name, const Variant& val
     LOG(Warning, "Failed to set animated model '{0}' missing parameter '{1}'", ToString(), name);
 }
 
-Variant AnimatedModel::GetParameterValue(const Guid& id)
+const Variant& AnimatedModel::GetParameterValue(const Guid& id) const
 {
     CHECK_ANIM_GRAPH_PARAM_ACCESS_RESULT(Variant::Null);
     for (auto& param : GraphInstance.Parameters)
@@ -504,7 +506,7 @@ void AnimatedModel::StopSlotAnimation(const StringView& slotName, Animation* ani
     {
         if (slot.Animation == anim && slot.Name == slotName)
         {
-            slot.Animation = nullptr;
+            //slot.Animation = nullptr; // TODO: make an immediate version of this method and set the animation to nullptr.
             slot.Reset = true;
             break;
         }
@@ -638,7 +640,7 @@ void AnimatedModel::RunBlendShapeDeformer(const MeshBase* mesh, MeshDeformationD
                 ASSERT_LOW_LAYER(blendShapeVertex.VertexIndex < vertexCount);
                 VB0SkinnedElementType& vertex = *(data + blendShapeVertex.VertexIndex);
                 vertex.Position = vertex.Position + blendShapeVertex.PositionDelta * q.Second;
-                Float3 normal = (vertex.Normal.ToFloat3() * 2.0f - 1.0f) + blendShapeVertex.NormalDelta;
+                Float3 normal = (vertex.Normal.ToFloat3() * 2.0f - 1.0f) + blendShapeVertex.NormalDelta * q.Second;
                 vertex.Normal = normal * 0.5f + 0.5f;
             }
         }
@@ -731,7 +733,9 @@ void AnimatedModel::UpdateBounds()
     }
     else if (model && model->IsLoaded() && model->LODs.Count() != 0)
     {
-        const BoundingBox modelBox = model->GetBox(_transform.GetWorld());
+        Matrix world;
+        GetLocalToWorldMatrix(world);
+        const BoundingBox modelBox = model->GetBox(world);
         BoundingBox box = modelBox;
         if (GraphInstance.NodesPose.Count() != 0)
         {
@@ -754,7 +758,7 @@ void AnimatedModel::UpdateBounds()
     }
     BoundingSphere::FromBox(_box, _sphere);
     if (_sceneRenderingKey != -1)
-        GetSceneRendering()->UpdateActor(this, _sceneRenderingKey);
+        GetSceneRendering()->UpdateActor(this, _sceneRenderingKey, ISceneRenderingListener::Bounds);
 }
 
 void AnimatedModel::UpdateSockets()
@@ -911,8 +915,8 @@ void AnimatedModel::Draw(RenderContext& renderContext)
     if (renderContext.View.Pass == DrawPass::GlobalSurfaceAtlas)
         return; // No supported
     Matrix world;
-    const Float3 translation = _transform.Translation - renderContext.View.Origin;
-    Matrix::Transformation(_transform.Scale, _transform.Orientation, translation, world);
+    GetLocalToWorldMatrix(world);
+    renderContext.View.GetWorldMatrix(world);
     GEOMETRY_DRAW_STATE_EVENT_BEGIN(_drawState, world);
 
     _lastMinDstSqr = Math::Min(_lastMinDstSqr, Vector3::DistanceSquared(_transform.Translation, renderContext.View.WorldPosition));
@@ -1014,6 +1018,45 @@ void AnimatedModel::OnDebugDrawSelected()
 
     // Base
     ModelInstanceActor::OnDebugDrawSelected();
+}
+
+void AnimatedModel::OnDebugDraw()
+{
+    if (ShowDebugDrawSkeleton && SkinnedModel && AnimationGraph)
+    {
+        if (GraphInstance.NodesPose.IsEmpty())
+            PreInitSkinningData();
+        Matrix world;
+        GetLocalToWorldMatrix(world);
+
+        // Draw bounding box at the node locations
+        const float boxSize = Math::Min(1.0f, (float)_sphere.Radius / 100.0f);
+        OrientedBoundingBox localBox(Vector3(-boxSize), Vector3(boxSize));
+        for (int32 nodeIndex = 0; nodeIndex < GraphInstance.NodesPose.Count(); nodeIndex++)
+        {
+            Matrix transform = GraphInstance.NodesPose[nodeIndex] * world;
+            Float3 scale, translation;
+            Matrix3x3 rotation;
+            transform.Decompose(scale, rotation, translation);
+            transform = Matrix::Invert(Matrix::Scaling(scale)) * transform;
+            OrientedBoundingBox box = localBox * transform;
+            DEBUG_DRAW_WIRE_BOX(box, Color::Green, 0, false);
+        }
+
+        // Nodes connections
+        for (int32 nodeIndex = 0; nodeIndex < SkinnedModel->Skeleton.Nodes.Count(); nodeIndex++)
+        {
+            int32 parentIndex = SkinnedModel->Skeleton.Nodes[nodeIndex].ParentIndex;
+            if (parentIndex != -1)
+            {
+                Float3 parentPos = (GraphInstance.NodesPose[parentIndex] * world).GetTranslation();
+                Float3 bonePos = (GraphInstance.NodesPose[nodeIndex] * world).GetTranslation();
+                DEBUG_DRAW_LINE(parentPos, bonePos, Color::Green, 0, false);
+            }
+        }
+    }
+
+    ModelInstanceActor::OnDebugDraw();
 }
 
 BoundingBox AnimatedModel::GetEditorBox() const

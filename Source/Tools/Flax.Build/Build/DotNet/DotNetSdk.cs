@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.IO;
@@ -130,12 +130,12 @@ namespace Flax.Build
         /// <summary>
         /// The minimum SDK version.
         /// </summary>
-        public static Version MinimumVersion => new Version(7, 0);
+        public static Version MinimumVersion => new Version(8, 0);
 
         /// <summary>
         /// The maximum SDK version.
         /// </summary>
-        public static Version MaximumVersion => new Version(8, 0);
+        public static Version MaximumVersion => new Version(9, 0);
 
         /// <inheritdoc />
         public override TargetPlatform[] Platforms
@@ -166,10 +166,11 @@ namespace Flax.Build
         /// </summary>
         public string CSharpLanguageVersion => Version.Major switch
         {
-            8 => "12.0",
-            7 => "11.0",
-            6 => "10.0",
-            5 => "9.0",
+            _ when Version.Major >= 9 => "13.0",
+            _ when Version.Major >= 8 => "12.0",
+            _ when Version.Major >= 7 => "11.0",
+            _ when Version.Major >= 6 => "10.0",
+            _ when Version.Major >= 5 => "9.0",
             _ => "7.3",
         };
 
@@ -243,19 +244,12 @@ namespace Flax.Build
                             dotnetPath = string.Empty;
                     }
                 }
-
-                bool isRunningOnArm64Targetx64 = architecture == TargetArchitecture.ARM64 && (Configuration.BuildArchitectures != null && Configuration.BuildArchitectures[0] == TargetArchitecture.x64);
-
-                // We need to support two paths here: 
-                // 1. We are running an x64 binary and we are running on an arm64 host machine 
-                // 2. We are running an Arm64 binary and we are targeting an x64 host machine
-                if (Flax.Build.Platforms.MacPlatform.GetProcessIsTranslated() || isRunningOnArm64Targetx64)
+                if (Flax.Build.Platforms.MacPlatform.BuildingForx64)
                 {
                     rid = "osx-x64";
                     dotnetPath = Path.Combine(dotnetPath, "x64");
                     architecture = TargetArchitecture.x64;
                 }
-
                 break;
             }
             default: throw new InvalidPlatformException(platform);
@@ -276,8 +270,9 @@ namespace Flax.Build
             dotnetSdkVersions = MergeVersions(dotnetSdkVersions, GetVersions(Path.Combine(dotnetPath, "sdk")));
             dotnetRuntimeVersions = MergeVersions(dotnetRuntimeVersions, GetVersions(Path.Combine(dotnetPath, "shared", "Microsoft.NETCore.App")));
 
-            dotnetSdkVersions = dotnetSdkVersions.Where(x => IsValidVersion(Path.Combine(dotnetPath, "sdk", x)));
-            dotnetRuntimeVersions = dotnetRuntimeVersions.Where(x => IsValidVersion(Path.Combine(dotnetPath, "shared", "Microsoft.NETCore.App", x)));
+            dotnetSdkVersions = dotnetSdkVersions.Where(x => File.Exists(Path.Combine(dotnetPath, "sdk", x, ".version")));
+            dotnetRuntimeVersions = dotnetRuntimeVersions.Where(x => File.Exists(Path.Combine(dotnetPath, "shared", "Microsoft.NETCore.App", x, ".version")));
+            dotnetRuntimeVersions = dotnetRuntimeVersions.Where(x => Directory.Exists(Path.Combine(dotnetPath, "packs", "Microsoft.NETCore.App.Ref", x)));
 
             dotnetSdkVersions = dotnetSdkVersions.OrderByDescending(ParseVersion);
             dotnetRuntimeVersions = dotnetRuntimeVersions.OrderByDescending(ParseVersion);
@@ -472,6 +467,8 @@ namespace Flax.Build
         {
             var versions = GetVersions(root);
             var version = GetVersion(versions);
+            if (version == null)
+                throw new Exception($"Failed to select dotnet version from '{root}' ({string.Join(", ", versions)})");
             return Path.Combine(root, version);
         }
 
@@ -546,11 +543,6 @@ namespace Flax.Build
                     return version;
             }
             return null;
-        }
-
-        private static bool IsValidVersion(string versionPath)
-        {
-            return File.Exists(Path.Combine(versionPath, ".version"));
         }
 
         private static string SearchForDotnetLocationLinux()

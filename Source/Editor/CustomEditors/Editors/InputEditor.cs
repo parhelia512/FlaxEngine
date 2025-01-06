@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System.Collections.Generic;
 using FlaxEditor.CustomEditors.GUI;
@@ -22,7 +22,8 @@ namespace FlaxEditor.CustomEditors.Editors
         /// <inheritdoc />
         public override void Initialize(LayoutElementsContainer layout)
         {
-            LinkedLabel.SetupContextMenu += OnSetupContextMenu;
+            if (LinkedLabel != null)
+                LinkedLabel.SetupContextMenu += OnSetupContextMenu;
             var comboBoxElement = layout.ComboBox();
             _comboBox = comboBoxElement.ComboBox;
             var names = new List<string>();
@@ -32,12 +33,26 @@ namespace FlaxEditor.CustomEditors.Editors
                     names.Add(mapping.Name);
             }
             _comboBox.Items = names;
-            if (Values[0] is InputEvent inputEvent && names.Contains(inputEvent.Name))
+            var prev = GetValue();
+            if (prev is InputEvent inputEvent && names.Contains(inputEvent.Name))
                 _comboBox.SelectedItem = inputEvent.Name;
+            else  if (prev is string name && names.Contains(name))
+                _comboBox.SelectedItem = name;
             _comboBox.SelectedIndexChanged += OnSelectedIndexChanged;
         }
 
-        private void OnSetupContextMenu(PropertyNameLabel label, ContextMenu menu, CustomEditor linkededitor)
+        private object GetValue()
+        {
+            if (Values[0] is InputEvent inputEvent)
+                return inputEvent;
+            if (Values[0] is string str)
+                return str;
+            if (Values.Type.Type == typeof(string))
+                return string.Empty;
+            return null;
+        }
+
+        private void OnSetupContextMenu(PropertyNameLabel label, ContextMenu menu, CustomEditor linkedEditor)
         {
             var button = menu.AddButton("Set to null");
             button.Clicked += () => _comboBox.SelectedItem = null;
@@ -45,7 +60,16 @@ namespace FlaxEditor.CustomEditors.Editors
 
         private void OnSelectedIndexChanged(ComboBox comboBox)
         {
-            SetValue(comboBox.SelectedItem == null ? null : new InputEvent(comboBox.SelectedItem));
+            object value = null;
+            if (comboBox.SelectedItem != null)
+            {
+                var prev = GetValue();
+                if (prev is InputEvent)
+                    value = new InputEvent(comboBox.SelectedItem);
+                else if (prev is string)
+                    value = comboBox.SelectedItem;
+            }
+            SetValue(value);
         }
 
         /// <inheritdoc />
@@ -58,8 +82,11 @@ namespace FlaxEditor.CustomEditors.Editors
             }
             else
             {
-                if (Values[0] is InputEvent inputEvent && _comboBox.Items.Contains(inputEvent.Name))
+                var prev = GetValue();
+                if (prev is InputEvent inputEvent && _comboBox.Items.Contains(inputEvent.Name))
                     _comboBox.SelectedItem = inputEvent.Name;
+                else if (prev is string name && _comboBox.Items.Contains(name))
+                    _comboBox.SelectedItem = name;
                 else
                     _comboBox.SelectedItem = null;
             }
@@ -105,7 +132,7 @@ namespace FlaxEditor.CustomEditors.Editors
             _comboBox.SelectedIndexChanged += OnSelectedIndexChanged;
         }
 
-        private void OnSetupContextMenu(PropertyNameLabel label, ContextMenu menu, CustomEditor linkededitor)
+        private void OnSetupContextMenu(PropertyNameLabel label, ContextMenu menu, CustomEditor linkedEditor)
         {
             var button = menu.AddButton("Set to null");
             button.Clicked += () => _comboBox.SelectedItem = null;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -428,6 +428,13 @@ namespace FlaxEditor.GUI
                 // Show dropdown list
                 _popupMenu.MinimumWidth = Width;
                 _popupMenu.Show(this, new Float2(1, Height));
+
+                // Adjust menu position if it is not the down direction
+                if (_popupMenu.Direction == ContextMenuDirection.RightUp)
+                {
+                    var position = _popupMenu.RootWindow.Window.Position;
+                    _popupMenu.RootWindow.Window.Position = new Float2(position.X, position.Y - Height);
+                }
             }
         }
 
@@ -547,7 +554,7 @@ namespace FlaxEditor.GUI
             // Check if has selected item
             if (_selectedIndices != null && _selectedIndices.Count > 0)
             {
-                string text = _selectedIndices.Count == 1 ? _items[_selectedIndices[0]] : "Multiple Values";
+                string text = _selectedIndices.Count == 1 ? (_selectedIndices[0] >= 0 && _selectedIndices[0] < _items.Count ? _items[_selectedIndices[0]] : "") : "Multiple Values";
 
                 // Draw text of the selected item
                 float textScale = Height / DefaultHeight;

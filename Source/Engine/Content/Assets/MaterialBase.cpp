@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "MaterialBase.h"
 #include "MaterialInstance.h"
@@ -25,13 +25,20 @@ Variant MaterialBase::GetParameterValue(const StringView& name)
     return Variant::Null;
 }
 
-void MaterialBase::SetParameterValue(const StringView& name, const Variant& value, bool warnIfMissing)
+void MaterialBase::SetParameterValue(const StringView& name, const Variant& value, bool warnIfMissing, bool warnIfWrongType)
 {
     const auto param = Params.Get(name);
     if (param)
     {
-        param->SetValue(value);
-        param->SetIsOverride(true);
+        if (Variant::CanCast(value, param->GetValue().Type))
+        {
+            param->SetValue(value);
+            param->SetIsOverride(true);
+        }
+        else if (warnIfWrongType)
+        {
+            LOG(Warning, "Material parameter '{0}' in material {1} is type '{2}' and not type '{3}'.", String(name), ToString(), param->GetValue().Type, value.Type);
+        }
     }
     else if (warnIfMissing)
     {
@@ -45,3 +52,13 @@ MaterialInstance* MaterialBase::CreateVirtualInstance()
     instance->SetBaseMaterial(this);
     return instance;
 }
+
+#if USE_EDITOR
+
+void MaterialBase::GetReferences(Array<Guid>& assets, Array<String>& files) const
+{
+    BinaryAsset::GetReferences(assets, files);
+    Params.GetReferences(assets);
+}
+
+#endif

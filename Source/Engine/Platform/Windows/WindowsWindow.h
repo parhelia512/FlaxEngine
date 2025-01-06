@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -28,6 +28,8 @@ private:
     bool _isSwitchingFullScreen = false;
     bool _trackingMouse = false;
     bool _clipCursorSet = false;
+    bool _lastCursorHidden = false;
+    int _cursorHiddenSafetyCount = 0;
     bool _isDuringMaximize = false;
     Windows::HANDLE _monitor = nullptr;
     Windows::LONG _clipCursorRect[4];
@@ -90,7 +92,7 @@ public:
 private:
 
     void CheckForWindowResize();
-    void UpdateCursor() const;
+    void UpdateCursor();
     void UpdateRegion();
 
 public:

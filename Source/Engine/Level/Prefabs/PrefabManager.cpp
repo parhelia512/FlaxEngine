@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "PrefabManager.h"
 #include "../Scene/Scene.h"
@@ -14,6 +14,7 @@
 #include "Engine/Core/Collections/CollectionPoolCache.h"
 #include "Engine/Profiler/ProfilerCPU.h"
 #include "Engine/Core/Cache.h"
+#include "Engine/Core/LogContext.h"
 #include "Engine/Debug/Exceptions/ArgumentException.h"
 #include "Engine/Engine/EngineService.h"
 #include "Engine/Scripting/Script.h"
@@ -122,6 +123,7 @@ Actor* PrefabManager::SpawnPrefab(Prefab* prefab, const Transform& transform, Ac
     }
     auto& data = *prefab->Data;
     SceneObjectsFactory::Context context(modifier.Value);
+    LogContextScope logContext(prefabId);
 
     // Deserialize prefab objects
     auto prevIdMapping = Scripting::ObjectsLookupIdMapping.Get();

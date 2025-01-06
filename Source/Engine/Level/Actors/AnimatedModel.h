@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -150,23 +150,30 @@ public:
     DrawPass DrawModes = DrawPass::Default;
 
     /// <summary>
-    /// The object sort order key used when sorting drawable objects during rendering. Use lower values to draw object before others, higher values are rendered later (on top). Can be use to control transparency drawing.
+    /// The object sort order key used when sorting drawable objects during rendering. Use lower values to draw object before others, higher values are rendered later (on top). Can be used to control transparency drawing.
     /// </summary>
     API_FIELD(Attributes="EditorDisplay(\"Skinned Model\"), EditorOrder(110), DefaultValue(0)")
-    int16 SortOrder = 0;
+    int8 SortOrder = 0;
 
     /// <summary>
     /// The shadows casting mode.
     /// [Deprecated on 26.10.2022, expires on 26.10.2024]
     /// </summary>
     API_FIELD(Attributes="EditorOrder(110), DefaultValue(ShadowsCastingMode.All), EditorDisplay(\"Skinned Model\")")
-    DEPRECATED ShadowsCastingMode ShadowsMode = ShadowsCastingMode::All;
+    DEPRECATED() ShadowsCastingMode ShadowsMode = ShadowsCastingMode::All;
 
     /// <summary>
     /// The animation root motion apply target. If not specified the animated model will apply it itself.
     /// </summary>
     API_FIELD(Attributes="EditorOrder(120), DefaultValue(null), EditorDisplay(\"Skinned Model\")")
     ScriptingObjectReference<Actor> RootMotionTarget;
+
+#if USE_EDITOR
+    /// <summary>
+    /// If checked, the skeleton pose will be shawn during debug shapes drawing.
+    /// </summary>
+    API_FIELD(Attributes="EditorOrder(200), EditorDisplay(\"Skinned Model\")") bool ShowDebugDrawSkeleton = false;
+#endif
 
 public:
     /// <summary>
@@ -301,7 +308,7 @@ public:
     /// </summary>
     /// <param name="name">The parameter name.</param>
     /// <returns>The value.</returns>
-    API_FUNCTION() Variant GetParameterValue(const StringView& name);
+    API_FUNCTION() const Variant& GetParameterValue(const StringView& name) const;
 
     /// <summary>
     /// Sets the anim graph instance parameter value.
@@ -315,7 +322,7 @@ public:
     /// </summary>
     /// <param name="id">The parameter id.</param>
     /// <returns>The value.</returns>
-    API_FUNCTION() Variant GetParameterValue(const Guid& id);
+    API_FUNCTION() const Variant& GetParameterValue(const Guid& id) const;
 
     /// <summary>
     /// Sets the anim graph instance parameter value.
@@ -416,6 +423,7 @@ public:
     void Draw(RenderContextBatch& renderContextBatch) override;
 #if USE_EDITOR
     void OnDebugDrawSelected() override;
+    void OnDebugDraw() override;
     BoundingBox GetEditorBox() const override;
 #endif
     bool IntersectsItself(const Ray& ray, Real& distance, Vector3& normal) override;

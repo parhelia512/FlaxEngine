@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -21,7 +21,7 @@ public:
     /// Gets the radius of the sphere, measured in the object's local space.
     /// </summary>
     /// <remarks>The sphere radius will be scaled by the actor's world scale.</remarks>
-    API_PROPERTY(Attributes="EditorOrder(100), DefaultValue(50.0f), EditorDisplay(\"Collider\")")
+    API_PROPERTY(Attributes="EditorOrder(100), DefaultValue(50.0f), EditorDisplay(\"Collider\"), ValueCategory(Utils.ValueCategory.Distance)")
     FORCE_INLINE float GetRadius() const
     {
         return _radius;
