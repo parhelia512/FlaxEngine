@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 // -----------------------------------------------------------------------------
 // Original code from SharpDX project. https://github.com/sharpdx/SharpDX/
@@ -228,7 +228,7 @@ namespace FlaxEngine
         /// <summary>
         /// Gets a value indicting whether this instance is normalized.
         /// </summary>
-        public bool IsNormalized => Mathf.IsOne(X * X + Y * Y + Z * Z);
+        public bool IsNormalized => Mathf.Abs((X * X + Y * Y + Z * Z) - 1.0f) < 1e-4f;
 
         /// <summary>
         /// Gets the normalized vector. Returned vector has length equal 1.
@@ -1518,6 +1518,20 @@ namespace FlaxEngine
         {
             TransformNormal(ref normal, ref transform, out var result);
             return result;
+        }
+
+        /// <summary>
+        /// Snaps the input position into the grid.
+        /// </summary>
+        /// <param name="pos">The position to snap.</param>
+        /// <param name="gridSize">The size of the grid.</param>
+        /// <returns>The position snapped to the grid.</returns>
+        public static Float3 SnapToGrid(Float3 pos, Float3 gridSize)
+        {
+            pos.X = Mathf.Ceil((pos.X - (gridSize.X * 0.5f)) / gridSize.X) * gridSize.X;
+            pos.Y = Mathf.Ceil((pos.Y - (gridSize.Y * 0.5f)) / gridSize.Y) * gridSize.Y;
+            pos.Z = Mathf.Ceil((pos.Z - (gridSize.Z * 0.5f)) / gridSize.Z) * gridSize.Z;
+            return pos;
         }
 
         /// <summary>

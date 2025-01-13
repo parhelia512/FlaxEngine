@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEditor.Scripting;
@@ -114,10 +114,10 @@ namespace FlaxEditor.Surface.Archetypes
             Op1(13, "Round", "Rounds A to the nearest integer"),
             Op1(14, "Saturate", "Clamps A to the range [0, 1]"),
             Op1(15, "Sine", "Returns sine of A"),
-            Op1(16, "Sqrt", "Returns square root of A", new [] { "Square Root", "Square", "Root" }),
+            Op1(16, "Sqrt", "Returns square root of A", new[] { "Square Root", "Square", "Root" }),
             Op1(17, "Tangent", "Returns tangent of A"),
             Op2(18, "Cross", "Returns the cross product of A and B", ConnectionsHint.None, typeof(Float3)),
-            Op2(19, "Distance", "Returns a distance scalar between A and B", new [] { "Magnitude", "Mag", "Length" }, ConnectionsHint.Vector, null, typeof(float), false),
+            Op2(19, "Distance", "Returns a distance scalar between A and B", new[] { "Magnitude", "Mag", "Length" }, ConnectionsHint.Vector, null, typeof(float), false),
             Op2(20, "Dot", "Returns the dot product of A and B", ConnectionsHint.Vector, null, typeof(float), false),
             Op2(21, "Max", "Selects the greater of A and B"),
             Op2(22, "Min", "Selects the lesser of A and B"),
@@ -156,7 +156,7 @@ namespace FlaxEditor.Surface.Archetypes
                 Title = "Lerp",
                 Description = "Performs a linear interpolation",
                 Flags = NodeFlags.AllGraphs,
-                Size = new Float2(110, 60),
+                Size = new Float2(150, 60),
                 ConnectionsHints = ConnectionsHint.Numeric,
                 IndependentBoxes = new[] { 0, 1 },
                 DependentBoxes = new[] { 3 },
@@ -192,7 +192,7 @@ namespace FlaxEditor.Surface.Archetypes
                 }
             },
             //
-            Op1(27, "Negate", "Returns opposite value", new [] { "Invert" }),
+            Op1(27, "Negate", "Returns opposite value", new[] { "Invert" }),
             Op1(28, "One Minus", "Returns 1 - value"),
             //
             new NodeArchetype
@@ -232,13 +232,14 @@ namespace FlaxEditor.Surface.Archetypes
             {
                 TypeID = 31,
                 Title = "Mad",
-                AlternativeTitles = new [] { "Multiply", "Add", "*+" },
+                AlternativeTitles = new[] { "Multiply", "Add", "*+" },
                 Description = "Performs value multiplication and addition at once",
                 Flags = NodeFlags.AllGraphs,
                 Size = new Float2(160, 60),
                 ConnectionsHints = ConnectionsHint.Numeric,
                 IndependentBoxes = new[] { 0, 1, 2 },
                 DependentBoxes = new[] { 3 },
+                SortScore = -1, // Lower sort score to not go above Multiply node
                 DefaultValues = new object[]
                 {
                     1.0f,
@@ -429,7 +430,7 @@ namespace FlaxEditor.Surface.Archetypes
                 Title = "Smoothstep",
                 Description = "Returns a smooth Hermite interpolation between 0 and 1, if value is in the range [min, max].",
                 Flags = NodeFlags.MaterialGraph,
-                Size = new Float2(120, 60),
+                Size = new Float2(200, 60),
                 ConnectionsHints = ConnectionsHint.Numeric,
                 IndependentBoxes = new[] { 0, 1, 2 },
                 DependentBoxes = new[] { 3 },

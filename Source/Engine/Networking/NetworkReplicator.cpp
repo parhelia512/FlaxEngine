@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "NetworkReplicator.h"
 #include "NetworkClient.h"
@@ -29,6 +29,9 @@
 #include "Engine/Scripting/ScriptingObjectReference.h"
 #include "Engine/Threading/Threading.h"
 #include "Engine/Threading/ThreadLocal.h"
+#if USE_EDITOR
+#include "FlaxEngine.Gen.h"
+#endif
 
 #if !BUILD_RELEASE
 bool NetworkReplicator::EnableLog = false;
@@ -235,6 +238,33 @@ namespace
 #endif
     Array<Guid> DespawnedObjects;
     uint32 SpawnId = 0;
+
+#if USE_EDITOR
+    void OnScriptsReloading()
+    {
+        ScopeLock lock(ObjectsLock);
+        if (Objects.HasItems())
+            LOG(Warning, "Hot-reloading scripts with network objects active.");
+        if (Hierarchy)
+        {
+            Delete(Hierarchy);
+            Hierarchy = nullptr;
+        }
+
+        // Clear any references to non-engine scripts before code hot-reload
+        BinaryModule* flaxModule = GetBinaryModuleFlaxEngine();
+        for (auto i = SerializersTable.Begin(); i.IsNotEnd(); ++i)
+        {
+            if (i->Key.Module != flaxModule)
+                SerializersTable.Remove(i);
+        }
+        for (auto i = NetworkRpcInfo::RPCsTable.Begin(); i.IsNotEnd(); ++i)
+        {
+            if (i->Key.First.Module != flaxModule)
+                NetworkRpcInfo::RPCsTable.Remove(i);
+        }
+    }
+#endif
 }
 
 class NetworkReplicationService : public EngineService
@@ -245,8 +275,17 @@ public:
     {
     }
 
+    bool Init() override;
     void Dispose() override;
 };
+
+bool NetworkReplicationService::Init()
+{
+#if USE_EDITOR
+    Scripting::ScriptsReloading.Bind(OnScriptsReloading);
+#endif
+    return false;
+}
 
 void NetworkReplicationService::Dispose()
 {
@@ -444,7 +483,6 @@ void SetupObjectSpawnMessageItem(SpawnItem* e, NetworkMessage& msg)
     NetworkMessageObjectSpawnItem msgDataItem;
     msgDataItem.ObjectId = item.ObjectId;
     msgDataItem.ParentId = item.ParentId;
-    if (NetworkManager::IsClient())
     {
         // Remap local client object ids into server ids
         IdsRemappingTable.KeyOf(msgDataItem.ObjectId, &msgDataItem.ObjectId);
@@ -532,6 +570,7 @@ void SendObjectRoleMessage(const NetworkReplicatedObject& item, const NetworkCli
 {
     NetworkMessageObjectRole msgData;
     msgData.ObjectId = item.ObjectId;
+    IdsRemappingTable.KeyOf(msgData.ObjectId, &msgData.ObjectId);
     msgData.OwnerClientId = item.OwnerClientId;
     auto peer = NetworkManager::Peer;
     NetworkMessage msg = peer->BeginSendMessage();
@@ -714,6 +753,7 @@ void InvokeObjectReplication(NetworkReplicatedObject& item, uint32 ownerFrame, b
     stream->SenderId = senderClientId;
 
     // Deserialize object
+    Scripting::ObjectsLookupIdMapping.Set(&IdsRemappingTable);
     const bool failed = NetworkReplicator::InvokeSerializer(obj->GetTypeHandle(), obj, stream, false);
     if (failed)
     {
@@ -1163,7 +1203,7 @@ void NetworkReplicator::RemoveObject(ScriptingObject* obj)
         return;
     ScopeLock lock(ObjectsLock);
     const auto it = Objects.Find(obj->GetID());
-    if (it != Objects.End())
+    if (it == Objects.End())
         return;
 
     // Remove object from the list
@@ -1262,6 +1302,24 @@ bool NetworkReplicator::HasObject(const ScriptingObject* obj)
     return false;
 }
 
+void NetworkReplicator::MapObjectId(Guid& objectId)
+{
+    if (!IdsRemappingTable.TryGet(objectId, objectId))
+    {
+        // Try inverse mapping
+        IdsRemappingTable.KeyOf(objectId, &objectId);
+    }
+}
+
+void NetworkReplicator::AddObjectIdMapping(const ScriptingObject* obj, const Guid& objectId)
+{
+    CHECK(obj);
+    CHECK(objectId.IsValid());
+    const Guid id = obj->GetID();
+    NETWORK_REPLICATOR_LOG(Info, "[NetworkReplicator] Remap object ID={} into object {}:{}", objectId, id.ToString(), obj->GetType().ToString());
+    IdsRemappingTable[objectId] = id;
+}
+
 ScriptingObject* NetworkReplicator::ResolveForeignObject(Guid objectId)
 {
     if (const auto& object = ResolveObject(objectId))
@@ -1352,12 +1410,20 @@ void NetworkReplicator::SetObjectOwnership(ScriptingObject* obj, uint32 ownerCli
                 if (ownerClientId == NetworkManager::LocalClientId)
                 {
                     // Ensure local client owns that object actually
-                    CHECK(localRole == NetworkObjectRole::OwnedAuthoritative);
+                    if (localRole != NetworkObjectRole::OwnedAuthoritative)
+                    {
+                        LOG(Error, "Cannot change overship of object (Id={}) to the local client (Id={}) if the local role is not set to OwnedAuthoritative.", obj->GetID(), ownerClientId);
+                        return;
+                    }
                 }
                 else
                 {
                     // Ensure local client doesn't own that object since it's owned by other client
-                    CHECK(localRole != NetworkObjectRole::OwnedAuthoritative);
+                    if (localRole == NetworkObjectRole::OwnedAuthoritative)
+                    {
+                        LOG(Error, "Cannot change overship of object (Id={}) to the remote client (Id={}) if the local role is set to OwnedAuthoritative.", obj->GetID(), ownerClientId);
+                        return;
+                    }
                 }
 #endif
                 item.HasOwnership = true;
@@ -1381,7 +1447,13 @@ void NetworkReplicator::SetObjectOwnership(ScriptingObject* obj, uint32 ownerCli
             if (item.OwnerClientId != ownerClientId)
             {
                 // Change role locally
-                CHECK(localRole != NetworkObjectRole::OwnedAuthoritative);
+#if !BUILD_RELEASE
+                if (localRole == NetworkObjectRole::OwnedAuthoritative)
+                {
+                    LOG(Error, "Cannot change overship of object (Id={}) to the remote client (Id={}) if the local role is set to OwnedAuthoritative.", obj->GetID(), ownerClientId);
+                    return;
+                }
+#endif
                 if (Hierarchy && item.Role == NetworkObjectRole::OwnedAuthoritative)
                     Hierarchy->RemoveObject(obj);
                 item.OwnerClientId = ownerClientId;
@@ -1393,7 +1465,13 @@ void NetworkReplicator::SetObjectOwnership(ScriptingObject* obj, uint32 ownerCli
         else
         {
             // Allow to change local role of the object (except ownership)
-            CHECK(localRole != NetworkObjectRole::OwnedAuthoritative);
+#if !BUILD_RELEASE
+                if (localRole == NetworkObjectRole::OwnedAuthoritative)
+                {
+                    LOG(Error, "Cannot change overship of object (Id={}) to the remote client (Id={}) if the local role is set to OwnedAuthoritative.", obj->GetID(), ownerClientId);
+                    return;
+                }
+#endif
             if (Hierarchy && it->Item.Role == NetworkObjectRole::OwnedAuthoritative)
                 Hierarchy->RemoveObject(obj);
             item.Role = localRole;
@@ -1443,6 +1521,8 @@ NetworkStream* NetworkReplicator::BeginInvokeRPC()
 
 bool NetworkReplicator::EndInvokeRPC(ScriptingObject* obj, const ScriptingTypeHandle& type, const StringAnsiView& name, NetworkStream* argsStream, Span<uint32> targetIds)
 {
+    if (targetIds.IsValid() && targetIds.Length() == 0)
+        return true; // Target list is provided, but it's empty so nobody will get this RPC
     Scripting::ObjectsLookupIdMapping.Set(nullptr);
     const NetworkRpcInfo* info = NetworkRpcInfo::RPCsTable.TryGet(NetworkRpcName(type, name));
     if (!info || !obj || NetworkManager::IsOffline())
@@ -1597,7 +1677,6 @@ void NetworkInternal::NetworkReplicatorUpdate()
             NETWORK_REPLICATOR_LOG(Info, "[NetworkReplicator] Despawn object ID={}", e.Id.ToString());
             NetworkMessageObjectDespawn msgData;
             msgData.ObjectId = e.Id;
-            if (isClient)
             {
                 // Remap local client object ids into server ids
                 IdsRemappingTable.KeyOf(msgData.ObjectId, &msgData.ObjectId);
@@ -1808,7 +1887,6 @@ void NetworkInternal::NetworkReplicatorUpdate()
             msgData.OwnerFrame = NetworkManager::Frame;
             msgData.ObjectId = item.ObjectId;
             msgData.ParentId = item.ParentId;
-            if (isClient)
             {
                 // Remap local client object ids into server ids
                 IdsRemappingTable.KeyOf(msgData.ObjectId, &msgData.ObjectId);
@@ -1905,7 +1983,6 @@ void NetworkInternal::NetworkReplicatorUpdate()
             NetworkMessageObjectRpc msgData;
             msgData.ObjectId = item.ObjectId;
             msgData.ParentId = item.ParentId;
-            if (isClient)
             {
                 // Remap local client object ids into server ids
                 IdsRemappingTable.KeyOf(msgData.ObjectId, &msgData.ObjectId);
@@ -2171,7 +2248,6 @@ void NetworkInternal::OnNetworkMessageObjectRpc(NetworkEvent& event, NetworkClie
         if (!obj)
             return;
 
-        
         // Validate RPC
         if (info->Server && NetworkManager::IsClient())
         {
@@ -2194,7 +2270,7 @@ void NetworkInternal::OnNetworkMessageObjectRpc(NetworkEvent& event, NetworkClie
         // Execute RPC
         info->Execute(obj, stream, info->Tag);
     }
-    else if(info->Channel != static_cast<uint8>(NetworkChannelType::Unreliable) && info->Channel != static_cast<uint8>(NetworkChannelType::UnreliableOrdered))
+    else if (info->Channel != static_cast<uint8>(NetworkChannelType::Unreliable) && info->Channel != static_cast<uint8>(NetworkChannelType::UnreliableOrdered))
     {
         NETWORK_REPLICATOR_LOG(Error, "[NetworkReplicator] Unknown object {} RPC {}::{}", msgData.ObjectId, String(msgData.RpcTypeName), String(msgData.RpcName));
     }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -256,6 +256,13 @@ namespace Flax.Build
 #endif
             if (buildOptions.ScriptingAPI.IgnoreMissingDocumentationWarnings)
                 args.Add("-nowarn:1591");
+            if (buildOptions.ScriptingAPI.IgnoreSpecificWarnings.Any())
+            {
+                foreach (var warningString in buildOptions.ScriptingAPI.IgnoreSpecificWarnings)
+                {
+                    args.Add($"-nowarn:{warningString}");
+                }
+            }
 
             // Optimizations prevent debugging, only enable in release builds by default
             var optimize = optimizeAssembly.HasValue ? optimizeAssembly.Value : buildData.Configuration == TargetConfiguration.Release;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Globalization;
@@ -15,6 +15,17 @@ using Newtonsoft.Json.Serialization;
 
 namespace FlaxEngine.Json
 {
+    sealed class StringWriterWithEncoding : StringWriter
+    {
+        public override Encoding Encoding { get; }
+
+        public StringWriterWithEncoding(System.Text.StringBuilder sb, IFormatProvider formatProvider, Encoding encoding)
+        : base(sb, formatProvider)
+        {
+            Encoding = encoding;
+        }    
+    }
+
     partial class JsonSerializer
     {
         internal class SerializerCache
@@ -37,7 +48,7 @@ namespace FlaxEngine.Json
             {
                 IsManagedOnly = isManagedOnly;
                 StringBuilder = new StringBuilder(256);
-                StringWriter = new StringWriter(StringBuilder, CultureInfo.InvariantCulture);
+                StringWriter = new StringWriterWithEncoding(StringBuilder, CultureInfo.InvariantCulture, Encoding.UTF8);
                 MemoryStream = new UnmanagedMemoryStream((byte*)0, 0);
 
 #if FLAX_EDITOR
@@ -235,15 +246,7 @@ namespace FlaxEngine.Json
         /// <returns>The output json string.</returns>
         public static string Serialize(object obj, bool isManagedOnly = false)
         {
-            Type type = obj.GetType();
-            var cache = isManagedOnly ? CacheManagedOnly.Value : Cache.Value;
-            Current.Value = cache;
-
-            cache.WriteBegin();
-            cache.SerializerWriter.Serialize(cache.JsonWriter, obj, type);
-            cache.WriteEnd();
-
-            return cache.StringBuilder.ToString();
+            return Serialize(obj, obj.GetType(), isManagedOnly);
         }
 
         /// <summary>

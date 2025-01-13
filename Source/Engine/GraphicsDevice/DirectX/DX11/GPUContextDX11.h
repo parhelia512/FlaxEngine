@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -32,7 +32,8 @@ private:
     ID3D11RenderTargetView* _rtHandles[GPU_MAX_RT_BINDED];
 
     // Shader Resources
-    bool _srDirtyFlag;
+    uint32 _srMaskDirtyGraphics;
+    uint32 _srMaskDirtyCompute;
     ID3D11ShaderResourceView* _srHandles[GPU_MAX_SR_BINDED];
 
     // Unordered Access
@@ -55,9 +56,13 @@ private:
     ID3D11RasterizerState* CurrentRasterizerState;
     ID3D11DepthStencilState* CurrentDepthStencilState;
     GPUShaderProgramVSDX11* CurrentVS;
+#if GPU_ALLOW_TESSELLATION_SHADERS
     GPUShaderProgramHSDX11* CurrentHS;
     GPUShaderProgramDSDX11* CurrentDS;
+#endif
+#if GPU_ALLOW_GEOMETRY_SHADERS
     GPUShaderProgramGSDX11* CurrentGS;
+#endif
     GPUShaderProgramPSDX11* CurrentPS;
     GPUShaderProgramCSDX11* CurrentCS;
     D3D11_PRIMITIVE_TOPOLOGY CurrentPrimitiveTopology;
@@ -108,7 +113,7 @@ public:
     void* GetNativePtr() const override;
     bool IsDepthBufferBinded() override;
     void Clear(GPUTextureView* rt, const Color& color) override;
-    void ClearDepth(GPUTextureView* depthBuffer, float depthValue) override;
+    void ClearDepth(GPUTextureView* depthBuffer, float depthValue, uint8 stencilValue) override;
     void ClearUA(GPUBuffer* buf, const Float4& value) override;
     void ClearUA(GPUBuffer* buf, const uint32 value[4]) override;
     void ClearUA(GPUTexture* texture, const uint32 value[4]) override;

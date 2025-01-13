@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "ManagedEditor.h"
 #include "Editor/Editor.h"
@@ -170,78 +170,6 @@ DEFINE_INTERNAL_CALL(bool) EditorInternal_CloneAssetFile(MString* dstPathObj, MS
     return Content::CloneAssetFile(dstPath, srcPath, *dstId);
 }
 
-enum class NewAssetType
-{
-    Material = 0,
-    MaterialInstance = 1,
-    CollisionData = 2,
-    AnimationGraph = 3,
-    SkeletonMask = 4,
-    ParticleEmitter = 5,
-    ParticleSystem = 6,
-    SceneAnimation = 7,
-    MaterialFunction = 8,
-    ParticleEmitterFunction = 9,
-    AnimationGraphFunction = 10,
-    Animation = 11,
-    BehaviorTree = 12,
-};
-
-DEFINE_INTERNAL_CALL(bool) EditorInternal_CreateAsset(NewAssetType type, MString* outputPathObj)
-{
-    String tag;
-    switch (type)
-    {
-    case NewAssetType::Material:
-        tag = AssetsImportingManager::CreateMaterialTag;
-        break;
-    case NewAssetType::MaterialInstance:
-        tag = AssetsImportingManager::CreateMaterialInstanceTag;
-        break;
-    case NewAssetType::CollisionData:
-        tag = AssetsImportingManager::CreateCollisionDataTag;
-        break;
-    case NewAssetType::AnimationGraph:
-        tag = AssetsImportingManager::CreateAnimationGraphTag;
-        break;
-    case NewAssetType::SkeletonMask:
-        tag = AssetsImportingManager::CreateSkeletonMaskTag;
-        break;
-    case NewAssetType::ParticleEmitter:
-        tag = AssetsImportingManager::CreateParticleEmitterTag;
-        break;
-    case NewAssetType::ParticleSystem:
-        tag = AssetsImportingManager::CreateParticleSystemTag;
-        break;
-    case NewAssetType::SceneAnimation:
-        tag = AssetsImportingManager::CreateSceneAnimationTag;
-        break;
-    case NewAssetType::MaterialFunction:
-        tag = AssetsImportingManager::CreateMaterialFunctionTag;
-        break;
-    case NewAssetType::ParticleEmitterFunction:
-        tag = AssetsImportingManager::CreateParticleEmitterFunctionTag;
-        break;
-    case NewAssetType::AnimationGraphFunction:
-        tag = AssetsImportingManager::CreateAnimationGraphFunctionTag;
-        break;
-    case NewAssetType::Animation:
-        tag = AssetsImportingManager::CreateAnimationTag;
-        break;
-    case NewAssetType::BehaviorTree:
-        tag = AssetsImportingManager::CreateBehaviorTreeTag;
-        break;
-    default:
-        return true;
-    }
-
-    String outputPath;
-    MUtils::ToString(outputPathObj, outputPath);
-    FileSystem::NormalizePath(outputPath);
-
-    return AssetsImportingManager::Create(tag, outputPath);
-}
-
 DEFINE_INTERNAL_CALL(bool) EditorInternal_CreateVisualScript(MString* outputPathObj, MString* baseTypenameObj)
 {
     String outputPath;
@@ -276,7 +204,7 @@ DEFINE_INTERNAL_CALL(bool) EditorInternal_SaveJsonAsset(MString* outputPathObj, 
     FileSystem::NormalizePath(outputPath);
 
     const StringView dataObjChars = MCore::String::GetChars(dataObj);
-    const StringAsANSI<> data(dataObjChars.Get(), dataObjChars.Length());
+    const StringAsUTF8<> data(dataObjChars.Get(), dataObjChars.Length());
     const StringAnsiView dataAnsi(data.Get(), data.Length());
 
     const StringView dataTypeNameObjChars = MCore::String::GetChars(dataTypeNameObj);
@@ -335,22 +263,24 @@ DEFINE_INTERNAL_CALL(MString*) EditorInternal_GetShaderAssetSourceCode(BinaryAss
     INTERNAL_CALL_CHECK_RETURN(obj, nullptr);
     if (obj->WaitForLoaded())
         DebugLog::ThrowNullReference();
-
     auto lock = obj->Storage->Lock();
-
     if (obj->LoadChunk(SHADER_FILE_CHUNK_SOURCE))
         return nullptr;
 
+    // Decrypt source code
     BytesContainer data;
     obj->GetChunkData(SHADER_FILE_CHUNK_SOURCE, data);
+    auto source = data.Get<char>();
+    auto sourceLength = data.Length();
+    if (sourceLength <= 0)
+        return MCore::String::GetEmpty();
+    Encryption::DecryptBytes(data.Get(), data.Length());
+    source[sourceLength - 1] = 0;
 
-    Encryption::DecryptBytes((byte*)data.Get(), data.Length());
-
-    const StringAnsiView srcData((const char*)data.Get(), data.Length());
-    const String source(srcData);
-    const auto str = MUtils::ToString(source);
-
-    Encryption::EncryptBytes((byte*)data.Get(), data.Length());
+    // Get source and encrypt it back
+    const StringAnsiView srcData(source, sourceLength);
+    const auto str = MUtils::ToString(srcData);
+    Encryption::EncryptBytes(data.Get(), data.Length());
 
     return str;
 }
@@ -581,6 +511,21 @@ DEFINE_INTERNAL_CALL(bool) EditorInternal_CanSetToRoot(Prefab* prefab, Actor* ta
     return true;
 }
 
+DEFINE_INTERNAL_CALL(void) EditorInternal_GetPrefabNestedObject(Guid* prefabId, Guid* prefabObjectId, Guid* outPrefabId, Guid* outPrefabObjectId)
+{
+    *outPrefabId = Guid::Empty;
+    *outPrefabObjectId = Guid::Empty;
+    const auto prefab = Content::Load<Prefab>(*prefabId);
+    if (!prefab)
+        return;
+    const ISerializable::DeserializeStream** prefabObjectDataPtr = prefab->ObjectsDataCache.TryGet(*prefabObjectId);
+    if (!prefabObjectDataPtr)
+        return;
+    const ISerializable::DeserializeStream& prefabObjectData = **prefabObjectDataPtr;
+    JsonTools::GetGuidIfValid(*outPrefabId, prefabObjectData, "PrefabID");
+    JsonTools::GetGuidIfValid(*outPrefabObjectId, prefabObjectData, "PrefabObjectID");
+}
+
 DEFINE_INTERNAL_CALL(float) EditorInternal_GetAnimationTime(AnimatedModel* animatedModel)
 {
     return animatedModel && animatedModel->GraphInstance.State.Count() == 1 ? animatedModel->GraphInstance.State[0].Animation.TimePosition : 0.0f;
@@ -634,13 +579,11 @@ bool ManagedEditor::Import(const String& inputPath, const String& outputPath, co
 
 bool ManagedEditor::TryRestoreImportOptions(ModelTool::Options& options, String assetPath)
 {
-    // Initialize defaults   
+    // Initialize defaults
     if (const auto* graphicsSettings = GraphicsSettings::Get())
     {
         options.GenerateSDF = graphicsSettings->GenerateSDFOnModelImport;
     }
-
-    // Get options from model
     FileSystem::NormalizePath(assetPath);
     return ImportModel::TryGetImportOptions(assetPath, options);
 }
@@ -652,7 +595,23 @@ bool ManagedEditor::Import(const String& inputPath, const String& outputPath, co
 
 bool ManagedEditor::TryRestoreImportOptions(AudioTool::Options& options, String assetPath)
 {
-    // Get options from model
     FileSystem::NormalizePath(assetPath);
     return ImportAudio::TryGetImportOptions(assetPath, options);
+}
+
+bool ManagedEditor::CreateAsset(const String& tag, String outputPath)
+{
+    FileSystem::NormalizePath(outputPath);
+    return AssetsImportingManager::Create(tag, outputPath);
+}
+
+Array<Guid> ManagedEditor::GetAssetReferences(const Guid& assetId)
+{
+    Array<Guid> result;
+    if (auto* asset = Content::Load<Asset>(assetId))
+    {
+        Array<String> files;
+        asset->GetReferences(result, files);
+    }
+    return result;
 }

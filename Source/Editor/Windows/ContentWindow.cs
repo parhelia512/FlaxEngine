@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -281,6 +281,9 @@ namespace FlaxEditor.Windows
             _view.OnDelete += Delete;
             _view.OnDuplicate += Duplicate;
             _view.OnPaste += Paste;
+
+            _view.InputActions.Add(options => options.Search, () => _itemsSearchBox.Focus());
+            InputActions.Add(options => options.Search, () => _itemsSearchBox.Focus());
         }
 
         private ContextMenu OnViewDropdownPopupCreate(ComboBox comboBox)
@@ -539,6 +542,8 @@ namespace FlaxEditor.Windows
                 return;
             }
 
+            newShortName = newShortName.Trim();
+
             // Cache data
             string extension = item.IsFolder ? "" : Path.GetExtension(item.Path);
             var newPath = StringUtils.CombinePaths(item.ParentFolder.Path, newShortName + extension);
@@ -633,12 +638,14 @@ namespace FlaxEditor.Windows
             var toDelete = new List<ContentItem>(items);
             toDelete.Sort((a, b) => a.IsFolder ? 1 : b.IsFolder ? -1 : a.Compare(b));
 
+            string singularPlural = toDelete.Count > 1 ? "s" : "";
+
             string msg = toDelete.Count == 1
-                         ? string.Format("Are you sure to delete \'{0}\'?\nThis action cannot be undone. Files will be deleted permanently.", items[0].Path)
-                         : string.Format("Are you sure to delete {0} selected items?\nThis action cannot be undone. Files will be deleted permanently.", items.Count);
+                         ? string.Format("Delete \'{0}\'?\n\nThis action cannot be undone.\nFile will be deleted permanently.", items[0].Path)
+                         : string.Format("Delete {0} selected items?\n\nThis action cannot be undone.\nFiles will be deleted permanently.", items.Count);
 
             // Ask user
-            if (MessageBox.Show(msg, "Delete asset(s)", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
+            if (MessageBox.Show(msg, "Delete asset" + singularPlural, MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
                 return;
 
             // Clear navigation
@@ -736,7 +743,8 @@ namespace FlaxEditor.Windows
         /// Pastes the specified files.
         /// </summary>
         /// <param name="files">The files paths to import.</param>
-        public void Paste(string[] files)
+        /// <param name="isCutting">Whether a cutting action is occuring.</param>
+        public void Paste(string[] files, bool isCutting)
         {
             var importFiles = new List<string>();
             foreach (var sourcePath in files)
@@ -747,7 +755,10 @@ namespace FlaxEditor.Windows
                     var newPath = StringUtils.NormalizePath(Path.Combine(CurrentViewFolder.Path, item.FileName));
                     if (sourcePath.Equals(newPath))
                         newPath = GetClonedAssetPath(item);
-                    Editor.ContentDatabase.Copy(item, newPath);
+                    if (isCutting)
+                        Editor.ContentDatabase.Move(item, newPath);
+                    else
+                        Editor.ContentDatabase.Copy(item, newPath);
                 }
                 else
                     importFiles.Add(sourcePath);
@@ -799,7 +810,10 @@ namespace FlaxEditor.Windows
             if (proxy == null)
                 throw new ArgumentNullException(nameof(proxy));
 
+            // Setup name
             string name = initialName ?? proxy.NewItemName;
+            if (!proxy.IsFileNameValid(name) || Utilities.Utils.HasInvalidPathChar(name))
+                name = proxy.NewItemName;
 
             // If the proxy can not be created in the current folder, then navigate to the content folder
             if (!proxy.CanCreate(CurrentViewFolder))
@@ -1060,7 +1074,7 @@ namespace FlaxEditor.Windows
             PerformLayout();
 
             // Load last viewed folder
-            if (Editor.ProjectCache.TryGetCustomData(ProjectDataLastViewedFolder, out var lastViewedFolder))
+            if (Editor.ProjectCache.TryGetCustomData(ProjectDataLastViewedFolder, out string lastViewedFolder))
             {
                 if (Editor.ContentDatabase.Find(lastViewedFolder) is ContentFolder folder)
                     _tree.Select(folder.Node);

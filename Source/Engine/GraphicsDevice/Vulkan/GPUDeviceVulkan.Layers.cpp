@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "GPUDeviceVulkan.h"
 #include "RenderToolsVulkan.h"
@@ -39,7 +39,7 @@ static const char* GInstanceExtensions[] =
     VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
     VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
 #endif
-#if VK_EXT_validation_cache
+#if VULKAN_USE_VALIDATION_CACHE
     VK_EXT_VALIDATION_CACHE_EXTENSION_NAME,
 #endif
 #if defined(VK_KHR_display) && 0
@@ -57,7 +57,7 @@ static const char* GDeviceExtensions[] =
 #if VK_KHR_maintenance1
     VK_KHR_MAINTENANCE1_EXTENSION_NAME,
 #endif
-#if VK_EXT_validation_cache
+#if VULKAN_USE_VALIDATION_CACHE
     VK_EXT_VALIDATION_CACHE_EXTENSION_NAME,
 #endif
 #if VK_KHR_sampler_mirror_clamp_to_edge
@@ -195,6 +195,16 @@ static bool ListContains(const Array<const char*>& list, const char* name)
     for (const char* element : list)
     {
         if (!StringUtils::Compare(element, name))
+            return true;
+    }
+    return false;
+}
+
+static bool ListContains(const Array<StringAnsi>& list, const char* name)
+{
+    for (const StringAnsi& element : list)
+    {
+        if (element == name)
             return true;
     }
     return false;
@@ -473,6 +483,10 @@ void GPUDeviceVulkan::GetDeviceExtensionsAndLayers(VkPhysicalDevice gpu, Array<c
     }
 
     // Add device layers for debugging
+    if (ListContains(foundUniqueExtensions, "VK_EXT_tooling_info"))
+    {
+        IsDebugToolAttached = true;
+    }
 #if VULKAN_USE_DEBUG_LAYER
     bool hasKhronosStandardValidationLayer = false, hasLunargStandardValidationLayer = false;
 #if VULKAN_USE_KHRONOS_STANDARD_VALIDATION
@@ -575,25 +589,15 @@ void GPUDeviceVulkan::GetDeviceExtensionsAndLayers(VkPhysicalDevice gpu, Array<c
 void GPUDeviceVulkan::ParseOptionalDeviceExtensions(const Array<const char*>& deviceExtensions)
 {
     Platform::MemoryClear(&OptionalDeviceExtensions, sizeof(OptionalDeviceExtensions));
-
-    const auto HasExtension = [&deviceExtensions](const char* name) -> bool
-    {
-        const Function<bool(const char* const&)> CheckCallback = [&name](const char* const& extension) -> bool
-        {
-            return StringUtils::Compare(extension, name) == 0;
-        };
-        return ArrayExtensions::Any(deviceExtensions, CheckCallback);
-    };
-
 #if VK_KHR_maintenance1
-    OptionalDeviceExtensions.HasKHRMaintenance1 = HasExtension(VK_KHR_MAINTENANCE1_EXTENSION_NAME);
+    OptionalDeviceExtensions.HasKHRMaintenance1 = RenderToolsVulkan::HasExtension(deviceExtensions, VK_KHR_MAINTENANCE1_EXTENSION_NAME);
 #endif
 #if VK_KHR_maintenance2
-    OptionalDeviceExtensions.HasKHRMaintenance2 = HasExtension(VK_KHR_MAINTENANCE2_EXTENSION_NAME);
+    OptionalDeviceExtensions.HasKHRMaintenance2 = RenderToolsVulkan::HasExtension(deviceExtensions, VK_KHR_MAINTENANCE2_EXTENSION_NAME);
 #endif
-    OptionalDeviceExtensions.HasMirrorClampToEdge = HasExtension(VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME);
-#if VK_EXT_validation_cache
-    OptionalDeviceExtensions.HasEXTValidationCache = HasExtension(VK_EXT_VALIDATION_CACHE_EXTENSION_NAME);
+    OptionalDeviceExtensions.HasMirrorClampToEdge = RenderToolsVulkan::HasExtension(deviceExtensions, VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME);
+#if VULKAN_USE_VALIDATION_CACHE
+    OptionalDeviceExtensions.HasEXTValidationCache = RenderToolsVulkan::HasExtension(deviceExtensions, VK_EXT_VALIDATION_CACHE_EXTENSION_NAME);
 #endif
 }
 

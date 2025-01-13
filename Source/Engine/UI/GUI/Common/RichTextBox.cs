@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System.Collections.Generic;
 
@@ -7,6 +7,7 @@ namespace FlaxEngine.GUI
     /// <summary>
     /// Rich text box control which can gather text input from the user and present text in highly formatted and stylized way.
     /// </summary>
+    [ActorToolbox("GUI")]
     public partial class RichTextBox : RichTextBoxBase
     {
         private TextBlockStyle _textStyle;

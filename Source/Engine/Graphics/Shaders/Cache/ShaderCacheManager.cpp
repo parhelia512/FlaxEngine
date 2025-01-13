@@ -7,9 +7,13 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Engine/EngineService.h"
 #include "Engine/Engine/Globals.h"
+#if USE_EDITOR
+#include "Engine/Engine/CommandLine.h"
+#endif
 #include "Engine/Graphics/Shaders/GPUShader.h"
 #include "Engine/Graphics/Materials/MaterialShader.h"
 #include "Engine/Particles/Graph/GPU/ParticleEmitterGraph.GPU.h"
+#include "FlaxEngine.Gen.h"
 
 const Char* ShaderProfileCacheDirNames[] =
 {
@@ -179,12 +183,21 @@ bool ShaderCacheManagerService::Init()
     // Validate the database cache version (need to recompile all shaders on shader cache format change)
     struct CacheVersion
     {
+        int32 EngineVersion = -1;
         int32 ShaderCacheVersion = -1;
         int32 MaterialGraphVersion = -1;
         int32 ParticleGraphVersion = -1;
+        bool ShaderDebug;
+        bool ShaderProfile;
     };
     CacheVersion cacheVersion;
     const String cacheVerFile = rootDir / TEXT("CacheVersion");
+#if USE_EDITOR
+    const bool shaderDebug = CommandLine::Options.ShaderDebug;
+    const bool shaderProfile = CommandLine::Options.ShaderProfile;
+#else
+    const bool shaderDebug = false;
+#endif
     if (FileSystem::FileExists(cacheVerFile))
     {
         if (File::ReadAllBytes(cacheVerFile, (byte*)&cacheVersion, sizeof(cacheVersion)))
@@ -193,9 +206,12 @@ bool ShaderCacheManagerService::Init()
             LOG(Warning, "Failed to read the shaders cache database version file.");
         }
     }
-    if (cacheVersion.ShaderCacheVersion != GPU_SHADER_CACHE_VERSION
+    if (cacheVersion.EngineVersion != FLAXENGINE_VERSION_BUILD
+        || cacheVersion.ShaderCacheVersion != GPU_SHADER_CACHE_VERSION
         || cacheVersion.MaterialGraphVersion != MATERIAL_GRAPH_VERSION
         || cacheVersion.ParticleGraphVersion != PARTICLE_GPU_GRAPH_VERSION
+        || cacheVersion.ShaderDebug != shaderDebug
+        || cacheVersion.ShaderProfile != shaderProfile
     )
     {
         LOG(Warning, "Shaders cache database is invalid. Performing reset.");
@@ -209,9 +225,12 @@ bool ShaderCacheManagerService::Init()
             LOG(Error, "Failed to createe the shaders cache database directory.");
         }
 
+        cacheVersion.EngineVersion = FLAXENGINE_VERSION_BUILD;
         cacheVersion.ShaderCacheVersion = GPU_SHADER_CACHE_VERSION;
         cacheVersion.MaterialGraphVersion = MATERIAL_GRAPH_VERSION;
         cacheVersion.ParticleGraphVersion = PARTICLE_GPU_GRAPH_VERSION;
+        cacheVersion.ShaderDebug = shaderDebug;
+        cacheVersion.ShaderProfile = shaderProfile;
         if (File::WriteAllBytes(cacheVerFile, (byte*)&cacheVersion, sizeof(cacheVersion)))
         {
             LOG(Error, "Failed to create the shaders cache database version file.");

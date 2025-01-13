@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "TerrainTools.h"
 #include "Engine/Core/Log.h"
@@ -20,7 +20,7 @@ bool TerrainTools::TryGetPatchCoordToAdd(Terrain* terrain, const Ray& ray, Int2&
 {
     CHECK_RETURN(terrain, true);
     result = Int2::Zero;
-    const float patchSize = terrain->GetChunkSize() * TERRAIN_UNITS_PER_VERTEX * TerrainPatch::CHUNKS_COUNT_EDGE;
+    const float patchSize = terrain->GetChunkSize() * TERRAIN_UNITS_PER_VERTEX * Terrain::ChunksCountEdge;
 
     // Try to pick any of the patch edges
     for (int32 patchIndex = 0; patchIndex < terrain->GetPatchesCount(); patchIndex++)
@@ -80,7 +80,7 @@ struct TextureDataResult
     }
 };
 
-bool GetTextureDataForSampling(Texture* texture, TextureDataResult& data)
+bool GetTextureDataForSampling(Texture* texture, TextureDataResult& data, bool hdr = false)
 {
     // Lock asset chunks (if not virtual)
     data.Lock = texture->LockData();
@@ -103,7 +103,7 @@ bool GetTextureDataForSampling(Texture* texture, TextureDataResult& data)
 
     // Decompress or convert data if need to
     data.Mip0DataPtr = &data.Mip0Data;
-    if (PixelFormatExtensions::IsCompressed(data.Format))
+    if (PixelFormatExtensions::IsCompressed(data.Format) || TextureTool::GetSampler(data.Format) == nullptr)
     {
         PROFILE_CPU_NAMED("Decompress");
 
@@ -122,7 +122,7 @@ bool GetTextureDataForSampling(Texture* texture, TextureDataResult& data)
         srcMip.Lines = src.Height;
 
         // Decompress texture
-        if (TextureTool::Convert(data.Tmp, src, PixelFormat::R8G8B8A8_UNorm))
+        if (TextureTool::Convert(data.Tmp, src, hdr ? PixelFormat::R16G16B16A16_Float : PixelFormat::R8G8B8A8_UNorm))
         {
             LOG(Warning, "Failed to decompress data.");
             return true;
@@ -134,7 +134,6 @@ bool GetTextureDataForSampling(Texture* texture, TextureDataResult& data)
         data.SlicePitch = data.Tmp.Items[0].Mips[0].DepthPitch;
         data.Mip0DataPtr = &data.Tmp.Items[0].Mips[0].Data;
     }
-    // TODO: convert to RGBA from other formats that cannot be sampled?
 
     // Check if can even sample the given format
     const auto sampler = TextureTool::GetSampler(data.Format);
@@ -155,7 +154,6 @@ bool TerrainTools::GenerateTerrain(Terrain* terrain, const Int2& numberOfPatches
         LOG(Warning, "Cannot setup terain with no patches.");
         return false;
     }
-
     PROFILE_CPU_NAMED("Terrain.GenerateTerrain");
 
     // Wait for assets to be loaded
@@ -179,7 +177,7 @@ bool TerrainTools::GenerateTerrain(Terrain* terrain, const Int2& numberOfPatches
     terrain->AddPatches(numberOfPatches);
 
     // Prepare data
-    const auto heightmapSize = terrain->GetChunkSize() * TerrainPatch::CHUNKS_COUNT_EDGE + 1;
+    const auto heightmapSize = terrain->GetChunkSize() * Terrain::ChunksCountEdge + 1;
     Array<float> heightmapData;
     heightmapData.Resize(heightmapSize * heightmapSize);
 
@@ -188,7 +186,7 @@ bool TerrainTools::GenerateTerrain(Terrain* terrain, const Int2& numberOfPatches
     {
         // Get data
         TextureDataResult dataHeightmap;
-        if (GetTextureDataForSampling(heightmap, dataHeightmap))
+        if (GetTextureDataForSampling(heightmap, dataHeightmap, true))
             return true;
         const auto sampler = TextureTool::GetSampler(dataHeightmap.Format);
 
@@ -198,7 +196,6 @@ bool TerrainTools::GenerateTerrain(Terrain* terrain, const Int2& numberOfPatches
         for (int32 patchIndex = 0; patchIndex < terrain->GetPatchesCount(); patchIndex++)
         {
             auto patch = terrain->GetPatch(patchIndex);
-
             const Vector2 uvStart = Vector2((float)patch->GetX(), (float)patch->GetZ()) * uvPerPatch;
 
             // Sample heightmap pixels with interpolation to get actual heightmap vertices locations
@@ -380,7 +377,7 @@ bool TerrainTools::ExportTerrain(Terrain* terrain, String outputFolder)
     const auto firstPatch = terrain->GetPatch(0);
 
     // Calculate texture size
-    const int32 patchEdgeVertexCount = terrain->GetChunkSize() * TerrainPatch::CHUNKS_COUNT_EDGE + 1;
+    const int32 patchEdgeVertexCount = terrain->GetChunkSize() * Terrain::ChunksCountEdge + 1;
     const int32 patchVertexCount = patchEdgeVertexCount * patchEdgeVertexCount;
 
     // Find size of heightmap in patches

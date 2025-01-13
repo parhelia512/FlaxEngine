@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -63,15 +63,28 @@ namespace Flax.Deps
         public abstract void Build(BuildOptions options);
 
         /// <summary>
+        /// Logs build process start.
+        /// </summary>
+        /// <param name="platform">Target platform.</param>
+        protected void BuildStarted(TargetPlatform platform)
+        {
+            Log.Info($"Building {GetType().Name} for {platform}");
+        }
+
+        /// <summary>
         /// Gets the dependency third-party packages binaries folder.
         /// </summary>
         /// <param name="options">The options.</param>
         /// <param name="platform">The target platform.</param>
         /// <param name="architecture">The target architecture.</param>
+        /// <param name="createIfMissing">Auto-create directory if it's missing.</param>
         /// <returns>The absolute path to the deps folder for the given platform and architecture configuration.</returns>
-        public static string GetThirdPartyFolder(BuildOptions options, TargetPlatform platform, TargetArchitecture architecture)
+        public static string GetThirdPartyFolder(BuildOptions options, TargetPlatform platform, TargetArchitecture architecture, bool createIfMissing = true)
         {
-            return Path.Combine(options.PlatformsFolder, platform.ToString(), "Binaries", "ThirdParty", architecture.ToString());
+            var path = Path.Combine(options.PlatformsFolder, platform.ToString(), "Binaries", "ThirdParty", architecture.ToString());
+            if (createIfMissing && !Directory.Exists(path))
+                Directory.CreateDirectory(path);
+            return path;
         }
 
         /// <summary>
@@ -128,7 +141,7 @@ namespace Flax.Deps
         /// <param name="submodules">True if initialize submodules of the repository (recursive).</param>
         public static void CloneGitRepo(string path, string url, string commit = null, string args = null, bool submodules = false)
         {
-            if (!Directory.Exists(Path.Combine(path, Path.GetFileNameWithoutExtension(url), ".git")))
+            if (!Directory.Exists(Path.Combine(path, ".git")))
             {
                 string cmdLine = string.Format("clone \"{0}\" \"{1}\"", url, path);
                 if (args != null)
@@ -136,15 +149,12 @@ namespace Flax.Deps
                 if (submodules)
                     cmdLine += " --recurse-submodules";
 
-                Utilities.Run("git", cmdLine, null, null, Utilities.RunOptions.None);
+                Utilities.Run("git", cmdLine, null, path, Utilities.RunOptions.DefaultTool);
                 if (submodules)
-                    Utilities.Run("git", "submodule update --init --recursive", null, null, Utilities.RunOptions.None);
+                    Utilities.Run("git", "submodule update --init --recursive", null, path, Utilities.RunOptions.DefaultTool);
             }
-
             if (commit != null)
-            {
-                Utilities.Run("git", string.Format("reset --hard {0}", commit), null, null, Utilities.RunOptions.None);
-            }
+                Utilities.Run("git", string.Format("reset --hard {0}", commit), null, path, Utilities.RunOptions.DefaultTool);
         }
 
         /// <summary>
@@ -156,7 +166,7 @@ namespace Flax.Deps
         /// <param name="submodules">True if initialize submodules of the repository (recursive).</param>
         public static void CloneGitRepoFast(string path, string url, string args = null, bool submodules = false)
         {
-            if (!Directory.Exists(Path.Combine(path, Path.GetFileNameWithoutExtension(url), ".git")))
+            if (!Directory.Exists(Path.Combine(path, ".git")))
             {
                 string cmdLine = string.Format("clone \"{0}\" \"{1}\" --depth 1", url, path);
                 if (args != null)
@@ -164,9 +174,9 @@ namespace Flax.Deps
                 if (submodules)
                     cmdLine += " --recurse-submodules";
 
-                Utilities.Run("git", cmdLine, null, null, Utilities.RunOptions.None);
+                Utilities.Run("git", cmdLine, null, path, Utilities.RunOptions.DefaultTool);
                 if (submodules)
-                    Utilities.Run("git", "submodule update --init --recursive", null, null, Utilities.RunOptions.None);
+                    Utilities.Run("git", "submodule update --init --recursive", null, path, Utilities.RunOptions.DefaultTool);
             }
         }
 
@@ -191,14 +201,14 @@ namespace Flax.Deps
                 if (submodules)
                     cmdLine += " --recurse-submodules";
 
-                Utilities.Run("git", cmdLine, null, null, Utilities.RunOptions.None);
+                Utilities.Run("git", cmdLine, null, path, Utilities.RunOptions.DefaultTool);
                 if (submodules)
-                    Utilities.Run("git", "submodule update --init --recursive", null, null, Utilities.RunOptions.None);
+                    Utilities.Run("git", "submodule update --init --recursive", null, path, Utilities.RunOptions.DefaultTool);
             }
 
             if (commit != null)
             {
-                Utilities.Run("git", string.Format("reset --hard {0}", commit), null, path, Utilities.RunOptions.None);
+                Utilities.Run("git", string.Format("reset --hard {0}", commit), null, path, Utilities.RunOptions.DefaultTool);
             }
         }
 
@@ -218,13 +228,13 @@ namespace Flax.Deps
             if (submodules)
                 cmdLine += " --recurse-submodules";
 
-            Utilities.Run("git", cmdLine, null, path, Utilities.RunOptions.None);
+            Utilities.Run("git", cmdLine, null, path, Utilities.RunOptions.DefaultTool);
             if (submodules)
-                Utilities.Run("git", "submodule update --init --recursive", null, null, Utilities.RunOptions.None);
+                Utilities.Run("git", "submodule update --init --recursive", null, path, Utilities.RunOptions.DefaultTool);
 
             if (commit != null)
             {
-                Utilities.Run("git", string.Format("reset --hard {0}", commit), null, path, Utilities.RunOptions.None);
+                Utilities.Run("git", string.Format("reset --hard {0}", commit), null, path, Utilities.RunOptions.DefaultTool);
             }
         }
 
@@ -234,7 +244,17 @@ namespace Flax.Deps
         /// <param name="path">The local path that contains git repository.</param>
         public static void GitResetLocalChanges(string path)
         {
-            Utilities.Run("git", "reset --hard", null, path, Utilities.RunOptions.None);
+            Utilities.Run("git", "reset --hard", null, path, Utilities.RunOptions.DefaultTool);
+        }
+
+        /// <summary>
+        /// Builds the cmake project.
+        /// </summary>
+        /// <param name="path">The path.</param>
+        /// <param name="envVars">Custom environment variables to pass to the child process.</param>
+        public static void BuildCmake(string path, Dictionary<string, string> envVars = null)
+        {
+            Utilities.Run("cmake", "--build .  --config Release", null, path, Utilities.RunOptions.DefaultTool, envVars);
         }
 
         /// <summary>
@@ -313,7 +333,7 @@ namespace Flax.Deps
             if (customArgs != null)
                 cmdLine += " " + customArgs;
 
-            Utilities.Run("cmake", cmdLine, null, path, Utilities.RunOptions.None, envVars);
+            Utilities.Run("cmake", cmdLine, null, path, Utilities.RunOptions.DefaultTool, envVars);
         }
 
         /// <summary>

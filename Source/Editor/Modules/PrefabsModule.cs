@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -202,6 +202,7 @@ namespace FlaxEditor.Modules
 
             var prefabId = ((ActorNode)selection[0]).Actor.PrefabID;
             var prefab = FlaxEngine.Content.LoadAsync<Prefab>(prefabId);
+            Editor.Windows.ContentWin.ClearItemsSearch();
             Editor.Windows.ContentWin.Select(prefab);
         }
 
@@ -225,8 +226,15 @@ namespace FlaxEditor.Modules
                 throw new ArgumentException("Missing prefab to apply.");
             PrefabApplying?.Invoke(prefab, instance);
 
+            // When applying changes to prefab from actor in level ignore it's root transformation (see ActorEditor.ProcessDiff)
+            var originalTransform = instance.LocalTransform;
+            if (instance.IsPrefabRoot && instance.HasScene)
+                instance.LocalTransform = prefab.GetDefaultInstance().Transform;
+
             // Call backend
-            if (PrefabManager.Internal_ApplyAll(FlaxEngine.Object.GetUnmanagedPtr(instance)))
+            var failed = PrefabManager.Internal_ApplyAll(FlaxEngine.Object.GetUnmanagedPtr(instance));
+            instance.LocalTransform = originalTransform;
+            if (failed)
                 throw new Exception("Failed to apply the prefab. See log to learn more.");
 
             PrefabApplied?.Invoke(prefab, instance);

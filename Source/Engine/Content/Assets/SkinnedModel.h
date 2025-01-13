@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -323,7 +323,7 @@ public:
     void InitAsVirtual() override;
     void CancelStreaming() override;
 #if USE_EDITOR
-    void GetReferences(Array<Guid>& output) const override;
+    void GetReferences(Array<Guid>& assets, Array<String>& files) const override;
 #endif
 
     // [StreamableResource]

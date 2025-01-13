@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "ManagedEditor.h"
 #include "Editor/Editor.h"
@@ -16,6 +16,7 @@
 #include "Engine/Engine/CommandLine.h"
 #include "Engine/Renderer/ProbesRenderer.h"
 #include "Engine/Animations/Graph/AnimGraph.h"
+#include "Engine/Core/ObjectsRemovalService.h"
 
 ManagedEditor::InternalOptions ManagedEditor::ManagedEditorOptions;
 
@@ -175,7 +176,7 @@ ManagedEditor::~ManagedEditor()
 void ManagedEditor::Init()
 {
     // Note: editor modules should perform quite fast init, any longer things should be done in async during 'editor splash screen time
-    void* args[4];
+    void* args[2];
     MClass* mclass = GetClass();
     if (mclass == nullptr)
     {
@@ -192,18 +193,22 @@ void ManagedEditor::Init()
         LOG(Fatal, "Failed to create editor instance.");
     }
     MObject* exception = nullptr;
-    bool isHeadless = CommandLine::Options.Headless.IsTrue();
-    bool skipCompile = CommandLine::Options.SkipCompile.IsTrue();
-    bool newProject = CommandLine::Options.NewProject.IsTrue();
-    args[0] = &isHeadless;
-    args[1] = &skipCompile;
-    args[2] = &newProject;
+    StartupFlags flags = StartupFlags::None;
+    if (CommandLine::Options.Headless.IsTrue())
+        flags |= StartupFlags::Headless;
+    if (CommandLine::Options.SkipCompile.IsTrue())
+        flags |= StartupFlags::SkipCompile;
+    if (CommandLine::Options.NewProject.IsTrue())
+        flags |= StartupFlags::NewProject;
+    if (CommandLine::Options.Exit.IsTrue())
+        flags |= StartupFlags::Exit;
+    args[0] = &flags;
     Guid sceneId;
     if (!CommandLine::Options.Play.HasValue() || (CommandLine::Options.Play.HasValue() && Guid::Parse(CommandLine::Options.Play.GetValue(), sceneId)))
     {
         sceneId = Guid::Empty;
     }
-    args[3] = &sceneId;
+    args[1] = &sceneId;
     initMethod->Invoke(instance, args, &exception);
     if (exception)
     {
@@ -218,10 +223,23 @@ void ManagedEditor::Init()
     WasExitCalled = false;
 
     // Load scripts if auto-load on startup is disabled
-    if (!ManagedEditorOptions.ForceScriptCompilationOnStartup || skipCompile)
+    if (!ManagedEditorOptions.ForceScriptCompilationOnStartup || EnumHasAllFlags(flags, StartupFlags::SkipCompile))
     {
         LOG(Info, "Loading managed assemblies (due to disabled compilation on startup)");
         Scripting::Load();
+
+        const auto endInitMethod = mclass->GetMethod("EndInit");
+        if (endInitMethod == nullptr)
+        {
+            LOG(Fatal, "Invalid Editor assembly! Missing EndInit method.");
+        }
+        endInitMethod->Invoke(instance, nullptr, &exception);
+        if (exception)
+        {
+            MException ex(exception);
+            ex.Log(LogType::Warning, TEXT("ManagedEditor::EndInit"));
+            LOG_STR(Fatal, TEXT("Failed to initialize editor during EndInit! ") + ex.Message);
+        }
     }
 
     // Call building if need to (based on CL)
@@ -278,13 +296,7 @@ void ManagedEditor::Update()
 void ManagedEditor::Exit()
 {
     if (WasExitCalled)
-    {
-        // Ups xD
-        LOG(Warning, "Managed Editor exit called after exit or before init.");
         return;
-    }
-
-    // Set flag
     WasExitCalled = true;
 
     // Skip if managed object is missing
@@ -576,6 +588,29 @@ bool ManagedEditor::EvaluateVisualScriptLocal(VisualScript* script, VisualScript
         return true;
     }
     return false;
+}
+
+void ManagedEditor::WipeOutLeftoverSceneObjects()
+{
+    Array<ScriptingObject*> objects = Scripting::GetObjects();
+    bool removedAny = false;
+    for (ScriptingObject* object : objects)
+    {
+        if (EnumHasAllFlags(object->Flags, ObjectFlags::IsDuringPlay) && EnumHasNoneFlags(object->Flags, ObjectFlags::WasMarkedToDelete))
+        {
+            if (auto* sceneObject = Cast<SceneObject>(object))
+            {
+                if (sceneObject->HasParent())
+                    continue; // Skip sub-objects
+
+                LOG(Error, "Object '{}' (ID={}, Type={}) is still in memory after play end but should be destroyed (memory leak).", sceneObject->GetNamePath(), sceneObject->GetID(), sceneObject->GetType().ToString());
+                sceneObject->DeleteObject();
+                removedAny = true;
+            }
+        }
+    }
+    if (removedAny)
+        ObjectsRemovalService::Flush();
 }
 
 void ManagedEditor::OnEditorAssemblyLoaded(MAssembly* assembly)

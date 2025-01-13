@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Material.h"
 #include "Engine/Core/Log.h"
@@ -187,6 +187,9 @@ Asset::LoadResult Material::load()
 #endif
     )
     {
+        // Guard file with the lock during shader generation (prevents FlaxStorage::Tick from messing with the file)
+        auto lock = Storage->Lock();
+
         // Prepare
         MaterialGenerator generator;
         generator.Error.Bind(&OnGeneratorError);
@@ -550,7 +553,7 @@ BytesContainer Material::LoadSurface(bool createDefaultIfMissing)
 
 #if USE_EDITOR
 
-bool Material::SaveSurface(BytesContainer& data, const MaterialInfo& info)
+bool Material::SaveSurface(const BytesContainer& data, const MaterialInfo& info)
 {
     // Wait for asset to be loaded or don't if last load failed (eg. by shader source compilation error)
     if (LastLoadFailed())

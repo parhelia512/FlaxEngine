@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -44,6 +44,7 @@ private:
     float _customAspectRatio;
     float _near;
     float _far;
+    float _orthoSize;
     float _orthoScale;
 
 #if USE_EDITOR
@@ -77,7 +78,7 @@ public:
     /// <summary>
     /// Gets the camera's field of view (in degrees).
     /// </summary>
-    API_PROPERTY(Attributes="EditorOrder(20), DefaultValue(60.0f), Limit(0, 179), EditorDisplay(\"Camera\", \"Field Of View\"), VisibleIf(nameof(UsePerspective))")
+    API_PROPERTY(Attributes="EditorOrder(20), DefaultValue(60.0f), Limit(0, 179), EditorDisplay(\"Camera\", \"Field Of View\"), VisibleIf(nameof(UsePerspective)), ValueCategory(Utils.ValueCategory.Angle)")
     float GetFieldOfView() const;
 
     /// <summary>
@@ -88,7 +89,7 @@ public:
     /// <summary>
     /// Gets the custom aspect ratio. 0 if not use custom value.
     /// </summary>
-    API_PROPERTY(Attributes="EditorOrder(50), DefaultValue(0.0f), Limit(0, 10, 0.01f), EditorDisplay(\"Camera\"), VisibleIf(nameof(UsePerspective))")
+    API_PROPERTY(Attributes="EditorOrder(50), DefaultValue(0.0f), Limit(0, 10, 0.01f), EditorDisplay(\"Camera\")")
     float GetCustomAspectRatio() const;
 
     /// <summary>
@@ -99,7 +100,7 @@ public:
     /// <summary>
     /// Gets camera's near plane distance.
     /// </summary>
-    API_PROPERTY(Attributes="EditorOrder(30), DefaultValue(10.0f), Limit(0, 1000, 0.05f), EditorDisplay(\"Camera\")")
+    API_PROPERTY(Attributes="EditorOrder(30), DefaultValue(10.0f), Limit(0, 1000, 0.05f), EditorDisplay(\"Camera\"), ValueCategory(Utils.ValueCategory.Distance)")
     float GetNearPlane() const;
 
     /// <summary>
@@ -110,13 +111,24 @@ public:
     /// <summary>
     /// Gets camera's far plane distance.
     /// </summary>
-    API_PROPERTY(Attributes="EditorOrder(40), DefaultValue(40000.0f), Limit(0, float.MaxValue, 5), EditorDisplay(\"Camera\")")
+    API_PROPERTY(Attributes="EditorOrder(40), DefaultValue(40000.0f), Limit(0, float.MaxValue, 5), EditorDisplay(\"Camera\"), ValueCategory(Utils.ValueCategory.Distance)")
     float GetFarPlane() const;
 
     /// <summary>
     /// Sets camera's far plane distance.
     /// </summary>
     API_PROPERTY() void SetFarPlane(float value);
+
+    /// <summary>
+    /// Gets the orthographic projection view height (width is based on the aspect ratio). Use `0` for size to be based on the viewport size.
+    /// </summary>
+    API_PROPERTY(Attributes="EditorOrder(59), DefaultValue(0.0f), Limit(0.0f), EditorDisplay(\"Camera\"), VisibleIf(nameof(UsePerspective), true)")
+    float GetOrthographicSize() const;
+
+    /// <summary>
+    /// Sets the orthographic projection view height (width is based on the aspect ratio). Use `0` for size to be based on the viewport size.
+    /// </summary>
+    API_PROPERTY() void SetOrthographicSize(float value);
 
     /// <summary>
     /// Gets the orthographic projection scale.

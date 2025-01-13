@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Animation.h"
 #include "SkinnedModel.h"
@@ -12,6 +12,8 @@
 #include "Engine/Serialization/MemoryReadStream.h"
 #if USE_EDITOR
 #include "Engine/Serialization/MemoryWriteStream.h"
+#include "Engine/Serialization/JsonWriters.h"
+#include "Engine/Content/JsonAsset.h"
 #include "Engine/Level/Level.h"
 #endif
 
@@ -413,10 +415,10 @@ bool Animation::Save(const StringView& path)
         MemoryWriteStream stream(4096);
 
         // Info
-        stream.WriteInt32(102);
+        stream.WriteInt32(103);
         stream.WriteDouble(Data.Duration);
         stream.WriteDouble(Data.FramesPerSecond);
-        stream.WriteBool(Data.EnableRootMotion);
+        stream.WriteByte((byte)Data.RootMotionFlags);
         stream.WriteString(Data.RootNodeName, 13);
 
         // Animation channels
@@ -486,6 +488,34 @@ bool Animation::Save(const StringView& path)
     return false;
 }
 
+void Animation::GetReferences(Array<Guid>& assets, Array<String>& files) const
+{
+    BinaryAsset::GetReferences(assets, files);
+
+    for (const auto& e : Events)
+    {
+        for (const auto& k : e.Second.GetKeyframes())
+        {
+            if (k.Value.Instance)
+            {
+                // Collect refs from Anim Event data (as Json)
+                rapidjson_flax::StringBuffer buffer;
+                CompactJsonWriter writer(buffer);
+                writer.StartObject();
+                k.Value.Instance->Serialize(writer, nullptr);
+                writer.EndObject();
+                JsonAssetBase::GetReferences(StringAnsiView((const char*)buffer.GetString(), (int32)buffer.GetSize()), assets);
+            }
+        }
+    }
+
+    // Add nested animations
+    for (const auto& e : NestedAnims)
+    {
+        assets.Add(e.Second.Anim.GetID());
+    }
+}
+
 #endif
 
 uint64 Animation::GetMemoryUsage() const
@@ -532,17 +562,22 @@ Asset::LoadResult Animation::load()
     int32 headerVersion = *(int32*)stream.GetPositionHandle();
     switch (headerVersion)
     {
-    case 100:
-    case 101:
-    case 102:
-    {
+    case 103:
         stream.ReadInt32(&headerVersion);
         stream.ReadDouble(&Data.Duration);
         stream.ReadDouble(&Data.FramesPerSecond);
-        Data.EnableRootMotion = stream.ReadBool();
+        stream.ReadByte((byte*)&Data.RootMotionFlags);
         stream.ReadString(&Data.RootNodeName, 13);
         break;
-    }
+    case 100:
+    case 101:
+    case 102:
+        stream.ReadInt32(&headerVersion);
+        stream.ReadDouble(&Data.Duration);
+        stream.ReadDouble(&Data.FramesPerSecond);
+        Data.RootMotionFlags = stream.ReadBool() ? AnimationRootMotionFlags::RootPositionXZ : AnimationRootMotionFlags::None;
+        stream.ReadString(&Data.RootNodeName, 13);
+        break;
     default:
         stream.ReadDouble(&Data.Duration);
         stream.ReadDouble(&Data.FramesPerSecond);

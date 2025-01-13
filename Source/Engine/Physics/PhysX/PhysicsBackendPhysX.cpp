@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if COMPILE_WITH_PHYSX
 
@@ -37,7 +37,9 @@
 #include <ThirdParty/PhysX/vehicle/PxVehicleNoDrive.h>
 #include <ThirdParty/PhysX/vehicle/PxVehicleDrive4W.h>
 #include <ThirdParty/PhysX/vehicle/PxVehicleDriveNW.h>
+#include <ThirdParty/PhysX/vehicle/PxVehicleDriveTank.h>
 #include <ThirdParty/PhysX/vehicle/PxVehicleUtilSetup.h>
+#include <ThirdParty/PhysX/vehicle/PxVehicleComponents.h>
 #include <ThirdParty/PhysX/PxFiltering.h>
 #endif
 #if WITH_CLOTH
@@ -100,9 +102,13 @@ struct ScenePhysX
     Array<nv::cloth::Cloth*> ClothsList;
 #endif
 
+#if WITH_VEHICLE
+    void UpdateVehicles(float dt);
+#endif
 #if WITH_CLOTH
     void PreSimulateCloth(int32 i);
     void SimulateCloth(int32 i);
+    void UpdateCloths(float dt);
 #endif
 };
 
@@ -228,9 +234,7 @@ class QueryFilterPhysX : public PxQueryFilterCallback
         // Check mask
         const PxFilterData shapeFilter = shape->getQueryFilterData();
         if ((filterData.word0 & shapeFilter.word0) == 0)
-        {
             return PxQueryHitType::eNONE;
-        }
 
         // Check if skip triggers
         const bool hitTriggers = filterData.word2 != 0;
@@ -321,7 +325,12 @@ class CharacterControllerHitReportPhysX : public PxUserControllerHitReport
 {
     void onHit(const PxControllerHit& hit, Collision& c)
     {
-        ASSERT_LOW_LAYER(c.ThisActor && c.OtherActor);
+        if (c.ThisActor == nullptr || c.OtherActor == nullptr)
+        {
+            // One of the actors was deleted (eg. via RigidBody destroyed by gameplay) then skip processing this collision
+            return;
+        }
+
         c.Impulse = Vector3::Zero;
         c.ThisVelocity = P2C(hit.dir) * hit.length;
         c.OtherVelocity = Vector3::Zero;
@@ -382,17 +391,17 @@ public:
             return PxQueryHitType::eNONE;
         const PxFilterData shapeFilter = shape->getQueryFilterData();
 
+        // Let triggers through
+        if (shape->getFlags() & PxShapeFlag::eTRIGGER_SHAPE)
+            return PxQueryHitType::eNONE;
+
         // Hardcoded id for vehicle shapes masking
         if (filterData.word3 == shapeFilter.word3)
-        {
             return PxQueryHitType::eNONE;
-        }
 
         // Collide for pairs (A,B) where the filtermask of A contains the ID of B and vice versa
         if ((filterData.word0 & shapeFilter.word1) && (shapeFilter.word0 & filterData.word1))
-        {
             return PxQueryHitType::eBLOCK;
-        }
 
         return PxQueryHitType::eNONE;
     }
@@ -483,8 +492,10 @@ protected:
     }
 };
 
+#define PxHitFlagEmpty (PxHitFlags)0
+#define SCENE_QUERY_FLAGS (PxHitFlag::ePOSITION | PxHitFlag::eNORMAL | PxHitFlag::eFACE_INDEX | PxHitFlag::eUV)
+
 #define SCENE_QUERY_SETUP(blockSingle) auto scenePhysX = (ScenePhysX*)scene; if (scene == nullptr) return false; \
-		const PxHitFlags hitFlags = PxHitFlag::ePOSITION | PxHitFlag::eNORMAL | PxHitFlag::eUV; \
 		PxQueryFilterData filterData; \
 		filterData.flags |=  PxQueryFlag::ePREFILTER; \
 		filterData.data.word0 = layerMask; \
@@ -562,6 +573,7 @@ namespace
     Array<PxBase*> DeleteObjects;
 
     bool _queriesHitTriggers = true;
+    bool _enableCCD = true;
     PhysicsCombineMode _frictionCombineMode = PhysicsCombineMode::Average;
     PhysicsCombineMode _restitutionCombineMode = PhysicsCombineMode::Average;
 
@@ -644,6 +656,19 @@ void GetShapeGeometry(const CollisionShape& shape, PxGeometryHolder& geometry)
     }
 }
 
+void GetShapeMaterials(Array<PxMaterial*, InlinedAllocation<1>>& materialsPhysX, Span<JsonAsset*> materials)
+{
+    materialsPhysX.Resize(materials.Length());
+    for (int32 i = 0; i < materials.Length(); i++)
+    {
+        PxMaterial* materialPhysX = DefaultMaterial;
+        const JsonAsset* material = materials.Get()[i];
+        if (material && !material->WaitForLoaded() && material->Instance)
+            materialPhysX = (PxMaterial*)((PhysicalMaterial*)material->Instance)->GetPhysicsMaterial();
+        materialsPhysX.Get()[i] = materialPhysX;
+    }
+}
+
 PxFilterFlags FilterShader(
     PxFilterObjectAttributes attributes0, PxFilterData filterData0,
     PxFilterObjectAttributes attributes1, PxFilterData filterData1,
@@ -682,6 +707,8 @@ PxFilterFlags FilterShader(
         pairFlags |= PxPairFlag::eNOTIFY_TOUCH_LOST;
         pairFlags |= PxPairFlag::ePOST_SOLVER_VELOCITY;
         pairFlags |= PxPairFlag::eNOTIFY_CONTACT_POINTS;
+        if (_enableCCD)
+            pairFlags |= PxPairFlag::eDETECT_CCD_CONTACT;
         return PxFilterFlag::eDEFAULT;
     }
 
@@ -699,6 +726,451 @@ void InitVehicleSDK()
         PxInitVehicleSDK(*PhysX);
         PxVehicleSetBasisVectors(PxVec3(0, 1, 0), PxVec3(0, 0, 1));
         PxVehicleSetUpdateMode(PxVehicleUpdateMode::eVELOCITY_CHANGE);
+    }
+}
+
+void ScenePhysX::UpdateVehicles(float dt)
+{
+    if (WheelVehicles.IsEmpty())
+        return;
+    PROFILE_CPU_NAMED("Physics.Vehicles");
+
+    // Update vehicles steering
+    WheelVehiclesCache.Clear();
+    WheelVehiclesCache.EnsureCapacity(WheelVehicles.Count());
+    int32 wheelsCount = 0;
+    for (auto wheelVehicle : WheelVehicles)
+    {
+        if (!wheelVehicle->IsActiveInHierarchy() || !wheelVehicle->GetEnableSimulation())
+            continue;
+        auto drive = (PxVehicleWheels*)wheelVehicle->_vehicle;
+        ASSERT(drive);
+        WheelVehiclesCache.Add(drive);
+        wheelsCount += drive->mWheelsSimData.getNbWheels();
+
+        const float deadZone = 0.1f;
+        bool isTank = wheelVehicle->_driveType == WheeledVehicle::DriveTypes::Tank;
+        float throttle = wheelVehicle->_throttle;
+        float steering = wheelVehicle->_steering;
+        float brake = wheelVehicle->_brake;
+        float leftThrottle = wheelVehicle->_tankLeftThrottle;
+        float rightThrottle = wheelVehicle->_tankRightThrottle;
+        float leftBrake = Math::Max(wheelVehicle->_tankLeftBrake, wheelVehicle->_handBrake);
+        float rightBrake = Math::Max(wheelVehicle->_tankRightBrake, wheelVehicle->_handBrake);
+        WheeledVehicle::DriveModes vehicleDriveMode = wheelVehicle->_driveControl.DriveMode;
+
+        if (isTank)
+        {
+            // Converting default vehicle controls to tank controls.
+            if (throttle != 0 || steering != 0)
+            {
+                leftThrottle = Math::Clamp(throttle + steering, -1.0f, 1.0f);
+                rightThrottle = Math::Clamp(throttle - steering, -1.0f, 1.0f);
+            }
+        }
+
+        // Converting special tank drive mode to standard tank mode when is turning.
+        if (isTank && vehicleDriveMode == WheeledVehicle::DriveModes::Standard)
+        {
+            // Special inputs when turning vehicle -1 1 to left or 1 -1 to turn right
+            // to:
+            // Standard inputs when turning vehicle 0 1 to left or 1 0 to turn right
+
+            if (leftThrottle < -deadZone && rightThrottle > deadZone)
+            {
+                leftThrottle = 0;
+                leftBrake = 1;
+            }
+            else if (leftThrottle > deadZone && rightThrottle < -deadZone)
+            {
+                rightThrottle = 0;
+                rightBrake = 1;
+            }
+        }
+
+        if (wheelVehicle->UseReverseAsBrake)
+        {
+            const float invalidDirectionThreshold = 80.0f;
+            const float breakThreshold = 8.0f;
+            const float forwardSpeed = wheelVehicle->GetForwardSpeed();
+            int currentGear = wheelVehicle->GetCurrentGear();
+            // Tank tracks direction: 1 forward -1 backward 0 neutral
+            bool toForward = false;
+            toForward |= throttle > deadZone;
+            toForward |= (leftThrottle > deadZone) && (rightThrottle > deadZone); // 1  1
+
+            bool toBackward = false;
+            toBackward |= throttle < -deadZone;
+            toBackward |= (leftThrottle < -deadZone) && (rightThrottle < -deadZone); // -1 -1
+            toBackward |= (leftThrottle < -deadZone) && (rightThrottle < deadZone); // -1  0
+            toBackward |= (leftThrottle < deadZone) && (rightThrottle < -deadZone); //  0 -1
+
+            bool isTankTurning = false;
+
+            if (isTank)
+            {
+                isTankTurning |= leftThrottle > deadZone && rightThrottle < -deadZone; //  1 -1
+                isTankTurning |= leftThrottle < -deadZone && rightThrottle > deadZone; // -1  1
+                isTankTurning |= leftThrottle < deadZone && rightThrottle > deadZone; //  0  1
+                isTankTurning |= leftThrottle > deadZone && rightThrottle < deadZone; //  1  0
+                isTankTurning |= leftThrottle < -deadZone && rightThrottle < deadZone; // -1  0
+                isTankTurning |= leftThrottle < deadZone && rightThrottle < -deadZone; //  0 -1
+
+                if (toForward || toBackward)
+                {
+                    isTankTurning = false;
+                }
+            }
+
+            // Automatic gear change when changing driving direction
+            if (Math::Abs(forwardSpeed) < invalidDirectionThreshold)
+            {
+                int targetGear = wheelVehicle->GetTargetGear();
+                if (toBackward && currentGear > 0 && targetGear >= 0)
+                {
+                    currentGear = -1;
+                }
+                else if (!toBackward && currentGear <= 0 && targetGear <= 0)
+                {
+                    currentGear = 1;
+                }
+                else if (isTankTurning && currentGear <= 0)
+                {
+                    currentGear = 1;
+                }
+
+                if (wheelVehicle->GetCurrentGear() != currentGear)
+                {
+                    wheelVehicle->SetCurrentGear(currentGear);
+                }
+            }
+
+            // Automatic break when changing driving direction
+            if (toForward)
+            {
+                if (forwardSpeed < -invalidDirectionThreshold)
+                {
+                    brake = 1.0f;
+                    leftBrake = 1.0f;
+                    rightBrake = 1.0f;
+                }
+            }
+            else if (toBackward)
+            {
+                if (forwardSpeed > invalidDirectionThreshold)
+                {
+                    brake = 1.0f;
+                    leftBrake = 1.0f;
+                    rightBrake = 1.0f;
+                }
+            }
+            else
+            {
+                if (forwardSpeed < breakThreshold && forwardSpeed > -breakThreshold && !isTankTurning) // not accelerating, very slow speed -> stop
+                {
+                    brake = 1.0f;
+                    leftBrake = 1.0f;
+                    rightBrake = 1.0f;
+                }
+            }
+
+            // Block throttle if user is changing driving direction
+            if ((toForward && currentGear < 0) || (toBackward && currentGear > 0))
+            {
+                throttle = 0.0f;
+                leftThrottle = 0;
+                rightThrottle = 0;
+            }
+
+            throttle = Math::Abs(throttle);
+
+            if (isTank)
+            {
+                // invert acceleration when moving to backward because tank inputs can be < 0
+                if (currentGear < 0)
+                {
+                    float lt = -leftThrottle;
+                    float rt = -rightThrottle;
+                    float lb = leftBrake;
+                    float rb = rightBrake;
+                    leftThrottle = rt;
+                    rightThrottle = lt;
+                    leftBrake = rb;
+                    rightBrake = lb;
+                }
+            }
+        }
+        else
+        {
+            throttle = Math::Max(throttle, 0.0f);
+        }
+
+        // Force brake the another side track to turn faster
+        if (Math::Abs(leftThrottle) > deadZone && Math::Abs(rightThrottle) < deadZone)
+        {
+            rightBrake = 1.0f;
+        }
+        if (Math::Abs(rightThrottle) > deadZone && Math::Abs(leftThrottle) < deadZone)
+        {
+            leftBrake = 1.0f;
+        }
+
+        // Smooth input controls
+        // @formatter:off
+        PxVehiclePadSmoothingData padSmoothing =
+        {
+            {
+                wheelVehicle->_driveControl.RiseRateAcceleration, // rise rate eANALOG_INPUT_ACCEL
+                wheelVehicle->_driveControl.RiseRateBrake,        // rise rate eANALOG_INPUT_BRAKE
+                wheelVehicle->_driveControl.RiseRateHandBrake,    // rise rate eANALOG_INPUT_HANDBRAKE
+                wheelVehicle->_driveControl.RiseRateSteer,        // rise rate eANALOG_INPUT_STEER_LEFT
+                wheelVehicle->_driveControl.RiseRateSteer,        // rise rate eANALOG_INPUT_STEER_RIGHT
+            },
+            {
+                wheelVehicle->_driveControl.FallRateAcceleration, // fall rate eANALOG_INPUT_ACCEL
+                wheelVehicle->_driveControl.FallRateBrake,        // fall rate eANALOG_INPUT_BRAKE
+                wheelVehicle->_driveControl.FallRateHandBrake,    // fall rate eANALOG_INPUT_HANDBRAKE
+                wheelVehicle->_driveControl.FallRateSteer,        // fall rate eANALOG_INPUT_STEER_LEFT
+                wheelVehicle->_driveControl.FallRateSteer,        // fall rate eANALOG_INPUT_STEER_RIGHT
+            }
+        };
+        PxVehicleKeySmoothingData keySmoothing =
+        {
+            {
+                wheelVehicle->_driveControl.RiseRateAcceleration, // rise rate eANALOG_INPUT_ACCEL
+                wheelVehicle->_driveControl.RiseRateBrake,        // rise rate eANALOG_INPUT_BRAKE
+                wheelVehicle->_driveControl.RiseRateHandBrake,    // rise rate eANALOG_INPUT_HANDBRAKE
+                wheelVehicle->_driveControl.RiseRateSteer,        // rise rate eANALOG_INPUT_STEER_LEFT
+                wheelVehicle->_driveControl.RiseRateSteer,        // rise rate eANALOG_INPUT_STEER_RIGHT
+            },
+            {
+                wheelVehicle->_driveControl.FallRateAcceleration, // fall rate eANALOG_INPUT_ACCEL
+                wheelVehicle->_driveControl.FallRateBrake,        // fall rate eANALOG_INPUT_BRAKE
+                wheelVehicle->_driveControl.FallRateHandBrake,    // fall rate eANALOG_INPUT_HANDBRAKE
+                wheelVehicle->_driveControl.FallRateSteer,        // fall rate eANALOG_INPUT_STEER_LEFT
+                wheelVehicle->_driveControl.FallRateSteer,        // fall rate eANALOG_INPUT_STEER_RIGHT
+            }
+        };
+        // @formatter:on
+
+        // Reduce steer by speed to make vehicle easier to maneuver 
+        constexpr int steerVsSpeedN = 8;
+        PxF32 steerVsForwardSpeedData[steerVsSpeedN];
+        const int lastSteerVsSpeedIndex = wheelVehicle->_driveControl.SteerVsSpeed.Count() - 1;
+        int steerVsSpeedIndex = 0;
+
+        // Steer vs speed data structure example:
+        // array:
+        // speed,   steer
+        // 1000,    1.0,
+        // 2000,    0.7,
+        // 5000,    0.5,
+        // ..
+
+        // fill the steerVsForwardSpeedData with the speed and steer
+        for (int32 i = 0; i < 8; i += 2)
+        {
+            steerVsForwardSpeedData[i] = wheelVehicle->_driveControl.SteerVsSpeed[steerVsSpeedIndex].Speed;
+            steerVsForwardSpeedData[i + 1] = wheelVehicle->_driveControl.SteerVsSpeed[steerVsSpeedIndex].Steer;
+            steerVsSpeedIndex = Math::Min(steerVsSpeedIndex + 1, lastSteerVsSpeedIndex);
+        }
+        const PxFixedSizeLookupTable<steerVsSpeedN> steerVsForwardSpeed(steerVsForwardSpeedData, 4);
+
+        if (wheelVehicle->UseAnalogSteering)
+        {
+            switch (wheelVehicle->_driveTypeCurrent)
+            {
+            case WheeledVehicle::DriveTypes::Drive4W:
+            {
+                PxVehicleDrive4WRawInputData rawInputData;
+                rawInputData.setAnalogAccel(throttle);
+                rawInputData.setAnalogBrake(brake);
+                rawInputData.setAnalogSteer(wheelVehicle->_steering);
+                rawInputData.setAnalogHandbrake(wheelVehicle->_handBrake);
+                PxVehicleDrive4WSmoothAnalogRawInputsAndSetAnalogInputs(padSmoothing, steerVsForwardSpeed, rawInputData, dt, false, *(PxVehicleDrive4W*)drive);
+                break;
+            }
+            case WheeledVehicle::DriveTypes::DriveNW:
+            {
+                PxVehicleDriveNWRawInputData rawInputData;
+                rawInputData.setAnalogAccel(throttle);
+                rawInputData.setAnalogBrake(brake);
+                rawInputData.setAnalogSteer(wheelVehicle->_steering);
+                rawInputData.setAnalogHandbrake(wheelVehicle->_handBrake);
+                PxVehicleDriveNWSmoothAnalogRawInputsAndSetAnalogInputs(padSmoothing, steerVsForwardSpeed, rawInputData, dt, false, *(PxVehicleDriveNW*)drive);
+                break;
+            }
+            case WheeledVehicle::DriveTypes::Tank:
+            {
+                PxVehicleDriveTankRawInputData driveMode = vehicleDriveMode == WheeledVehicle::DriveModes::Standard ? PxVehicleDriveTankControlModel::eSTANDARD : PxVehicleDriveTankControlModel::eSPECIAL;
+                PxVehicleDriveTankRawInputData rawInputData = PxVehicleDriveTankRawInputData(driveMode);
+                rawInputData.setAnalogAccel(Math::Max(Math::Abs(leftThrottle), Math::Abs(rightThrottle)));
+                rawInputData.setAnalogLeftBrake(leftBrake);
+                rawInputData.setAnalogRightBrake(rightBrake);
+                rawInputData.setAnalogLeftThrust(leftThrottle);
+                rawInputData.setAnalogRightThrust(rightThrottle);
+                PxVehicleDriveTankSmoothAnalogRawInputsAndSetAnalogInputs(padSmoothing, rawInputData, dt, *(PxVehicleDriveTank*)drive);
+                break;
+            }
+            }
+        }
+        else
+        {
+            switch (wheelVehicle->_driveTypeCurrent)
+            {
+            case WheeledVehicle::DriveTypes::Drive4W:
+            {
+                PxVehicleDrive4WRawInputData rawInputData;
+                rawInputData.setDigitalAccel(throttle > deadZone);
+                rawInputData.setDigitalBrake(brake > deadZone);
+                rawInputData.setDigitalSteerLeft(wheelVehicle->_steering < -deadZone);
+                rawInputData.setDigitalSteerRight(wheelVehicle->_steering > deadZone);
+                rawInputData.setDigitalHandbrake(wheelVehicle->_handBrake > deadZone);
+                PxVehicleDrive4WSmoothDigitalRawInputsAndSetAnalogInputs(keySmoothing, steerVsForwardSpeed, rawInputData, dt, false, *(PxVehicleDrive4W*)drive);
+                break;
+            }
+            case WheeledVehicle::DriveTypes::DriveNW:
+            {
+                PxVehicleDriveNWRawInputData rawInputData;
+                rawInputData.setDigitalAccel(throttle > deadZone);
+                rawInputData.setDigitalBrake(brake > deadZone);
+                rawInputData.setDigitalSteerLeft(wheelVehicle->_steering < -deadZone);
+                rawInputData.setDigitalSteerRight(wheelVehicle->_steering > deadZone);
+                rawInputData.setDigitalHandbrake(wheelVehicle->_handBrake > deadZone);
+                PxVehicleDriveNWSmoothDigitalRawInputsAndSetAnalogInputs(keySmoothing, steerVsForwardSpeed, rawInputData, dt, false, *(PxVehicleDriveNW*)drive);
+                break;
+            }
+            case WheeledVehicle::DriveTypes::Tank:
+            {
+                // Convert analog inputs to digital inputs
+                leftThrottle = Math::Round(leftThrottle);
+                rightThrottle = Math::Round(rightThrottle);
+                leftBrake = Math::Round(leftBrake);
+                rightBrake = Math::Round(rightBrake);
+
+                PxVehicleDriveTankRawInputData driveMode = vehicleDriveMode == WheeledVehicle::DriveModes::Standard ? PxVehicleDriveTankControlModel::eSTANDARD : PxVehicleDriveTankControlModel::eSPECIAL;
+                PxVehicleDriveTankRawInputData rawInputData = PxVehicleDriveTankRawInputData(driveMode);
+                rawInputData.setAnalogAccel(Math::Max(Math::Abs(leftThrottle), Math::Abs(rightThrottle)));
+                rawInputData.setAnalogLeftBrake(leftBrake);
+                rawInputData.setAnalogRightBrake(rightBrake);
+                rawInputData.setAnalogLeftThrust(leftThrottle);
+                rawInputData.setAnalogRightThrust(rightThrottle);
+
+                // Needs to pass analog values to vehicle to maintain current movement direction because digital inputs accept only true/false values to tracks thrust instead of -1 to 1 
+                PxVehicleDriveTankSmoothAnalogRawInputsAndSetAnalogInputs(padSmoothing, rawInputData, dt, *(PxVehicleDriveTank*)drive);
+                break;
+            }
+            }
+        }
+    }
+
+    // Update batches queries cache
+    if (wheelsCount > WheelRaycastBatchQuerySize)
+    {
+        if (WheelRaycastBatchQuery)
+            WheelRaycastBatchQuery->release();
+        WheelRaycastBatchQuerySize = wheelsCount;
+        WheelRaycastBatchQuery = PxCreateBatchQueryExt(*Scene, &WheelRaycastFilter, wheelsCount, wheelsCount, 0, 0, 0, 0);
+    }
+
+    // Update lookup table that maps wheel type into the surface friction
+    if (!WheelTireFrictions || WheelTireFrictionsDirty)
+    {
+        WheelTireFrictionsDirty = false;
+        RELEASE_PHYSX(WheelTireFrictions);
+        Array<PxMaterial*, InlinedAllocation<8>> materials;
+        materials.Resize(Math::Min<int32>((int32)PhysX->getNbMaterials(), PxVehicleDrivableSurfaceToTireFrictionPairs::eMAX_NB_SURFACE_TYPES));
+        PxMaterial** materialsPtr = materials.Get();
+        PhysX->getMaterials(materialsPtr, materials.Count(), 0);
+        Array<PxVehicleDrivableSurfaceType, InlinedAllocation<8>> tireTypes;
+        tireTypes.Resize(materials.Count());
+        PxVehicleDrivableSurfaceType* tireTypesPtr = tireTypes.Get();
+        for (int32 i = 0; i < tireTypes.Count(); i++)
+            tireTypesPtr[i].mType = i;
+        WheelTireFrictions = PxVehicleDrivableSurfaceToTireFrictionPairs::allocate(WheelTireTypes.Count(), materials.Count());
+        WheelTireFrictions->setup(WheelTireTypes.Count(), materials.Count(), (const PxMaterial**)materialsPtr, tireTypesPtr);
+        for (int32 material = 0; material < materials.Count(); material++)
+        {
+            float friction = materialsPtr[material]->getStaticFriction();
+            for (int32 tireType = 0; tireType < WheelTireTypes.Count(); tireType++)
+            {
+                float scale = WheelTireTypes[tireType];
+                WheelTireFrictions->setTypePairFriction(material, tireType, friction * scale);
+            }
+        }
+    }
+
+    // Setup cache for wheel states
+    WheelVehiclesResultsPerVehicle.Resize(WheelVehiclesCache.Count(), false);
+    WheelVehiclesResultsPerWheel.Resize(wheelsCount, false);
+    wheelsCount = 0;
+    for (int32 i = 0, ii = 0; i < WheelVehicles.Count(); i++)
+    {
+        auto wheelVehicle = WheelVehicles[i];
+        if (!wheelVehicle->IsActiveInHierarchy() || !wheelVehicle->GetEnableSimulation())
+            continue;
+        auto drive = (PxVehicleWheels*)WheelVehicles[ii]->_vehicle;
+        auto& perVehicle = WheelVehiclesResultsPerVehicle[ii];
+        ii++;
+        perVehicle.nbWheelQueryResults = drive->mWheelsSimData.getNbWheels();
+        perVehicle.wheelQueryResults = WheelVehiclesResultsPerWheel.Get() + wheelsCount;
+        wheelsCount += perVehicle.nbWheelQueryResults;
+    }
+
+    // Update vehicles
+    if (WheelVehiclesCache.Count() != 0)
+    {
+        PxVehicleSuspensionRaycasts(WheelRaycastBatchQuery, WheelVehiclesCache.Count(), WheelVehiclesCache.Get());
+        PxVehicleUpdates(dt, Scene->getGravity(), *WheelTireFrictions, WheelVehiclesCache.Count(), WheelVehiclesCache.Get(), WheelVehiclesResultsPerVehicle.Get());
+    }
+
+    // Synchronize state
+    for (int32 i = 0, ii = 0; i < WheelVehicles.Count(); i++)
+    {
+        auto wheelVehicle = WheelVehicles[i];
+        if (!wheelVehicle->IsActiveInHierarchy() || !wheelVehicle->GetEnableSimulation())
+            continue;
+        auto drive = WheelVehiclesCache[ii];
+        auto& perVehicle = WheelVehiclesResultsPerVehicle[ii];
+        ii++;
+#if PHYSX_VEHICLE_DEBUG_TELEMETRY
+        LOG(Info, "Vehicle[{}] Gear={}, RPM={}", ii, wheelVehicle->GetCurrentGear(), (int32)wheelVehicle->GetEngineRotationSpeed());
+#endif
+
+        // Update wheels
+        for (int32 j = 0; j < wheelVehicle->_wheelsData.Count(); j++)
+        {
+            auto& wheelData = wheelVehicle->_wheelsData[j];
+            auto& perWheel = perVehicle.wheelQueryResults[j];
+#if PHYSX_VEHICLE_DEBUG_TELEMETRY
+            LOG(Info, "Vehicle[{}] Wheel[{}] longitudinalSlip={}, lateralSlip={}, suspSpringForce={}", ii, j, Utilities::RoundTo2DecimalPlaces(perWheel.longitudinalSlip), Utilities::RoundTo2DecimalPlaces(perWheel.lateralSlip), (int32)perWheel.suspSpringForce);
+#endif
+
+            auto& state = wheelData.State;
+            state.IsInAir = perWheel.isInAir;
+            state.TireContactCollider = perWheel.tireContactShape ? static_cast<PhysicsColliderActor*>(perWheel.tireContactShape->userData) : nullptr;
+            state.TireContactPoint = P2C(perWheel.tireContactPoint) + Origin;
+            state.TireContactNormal = P2C(perWheel.tireContactNormal);
+            state.TireFriction = perWheel.tireFriction;
+            state.SteerAngle = RadiansToDegrees * perWheel.steerAngle;
+            state.RotationAngle = -RadiansToDegrees * drive->mWheelsDynData.getWheelRotationAngle(j);
+            state.SuspensionOffset = perWheel.suspJounce;
+#if USE_EDITOR
+            state.SuspensionTraceStart = P2C(perWheel.suspLineStart) + Origin;
+            state.SuspensionTraceEnd = P2C(perWheel.suspLineStart + perWheel.suspLineDir * perWheel.suspLineLength) + Origin;
+#endif
+
+            if (!wheelData.Collider)
+                continue;
+            auto shape = (PxShape*)wheelData.Collider->GetPhysicsShape();
+
+            // Update wheel collider transformation
+            auto localPose = shape->getLocalPose();
+            Transform t = wheelData.Collider->GetLocalTransform();
+            t.Orientation = Quaternion::Euler(-state.RotationAngle, state.SteerAngle, 0) * wheelData.LocalOrientation;
+            t.Translation = P2C(localPose.p) / wheelVehicle->GetScale() - t.Orientation * wheelData.Collider->GetCenter();
+            wheelData.Collider->SetLocalTransform(t);
+        }
     }
 }
 
@@ -905,6 +1377,58 @@ void ScenePhysX::SimulateCloth(int32 i)
     ClothSolver->simulateChunk(i);
 }
 
+void ScenePhysX::UpdateCloths(float dt)
+{
+    nv::cloth::Solver* clothSolver = ClothSolver;
+    if (!clothSolver || ClothsList.IsEmpty())
+        return;
+    PROFILE_CPU_NAMED("Physics.Cloth");
+
+    {
+        PROFILE_CPU_NAMED("Pre");
+        Function<void(int32)> job;
+        job.Bind<ScenePhysX, &ScenePhysX::PreSimulateCloth>(this);
+        JobSystem::Execute(job, ClothsList.Count());
+    }
+
+    {
+        PROFILE_CPU_NAMED("Simulation");
+        if (clothSolver->beginSimulation(dt))
+        {
+            Function<void(int32)> job;
+            job.Bind<ScenePhysX, &ScenePhysX::SimulateCloth>(this);
+            JobSystem::Execute(job, clothSolver->getSimulationChunkCount());
+            clothSolver->endSimulation();
+        }
+    }
+
+    {
+        PROFILE_CPU_NAMED("Post");
+        ScopeLock lock(ClothLocker);
+        Array<Cloth*> brokenCloths;
+        for (auto clothPhysX : ClothsList)
+        {
+            const auto& clothSettings = Cloths[clothPhysX];
+            if (clothSettings.Culled)
+                continue;
+            if (clothSettings.UpdateBounds(clothPhysX))
+                brokenCloths.Add(clothSettings.Actor);
+            clothSettings.Actor->OnPostUpdate();
+        }
+        for (auto cloth : brokenCloths)
+        {
+            // Rebuild cloth object but keep fabric ref to prevent fabric recook
+            auto fabric = &((nv::cloth::Cloth*)cloth->GetPhysicsCloth())->getFabric();
+            Fabrics[fabric].Refs++;
+            fabric->incRefCount();
+            cloth->Rebuild();
+            fabric->decRefCount();
+            if (--Fabrics[fabric].Refs == 0)
+                Fabrics.Remove(fabric);
+        }
+    }
+}
+
 #endif
 
 void* PhysicalMaterial::GetPhysicsMaterial()
@@ -1082,6 +1606,24 @@ PxMaterial* PhysicsBackendPhysX::GetDefaultMaterial()
     return DefaultMaterial;
 }
 
+void PhysicsBackendPhysX::SimulationStepDone(PxScene* scene, float dt)
+{
+#if WITH_VEHICLE
+    ScenePhysX* scenePhysX = nullptr;
+    for (auto e : Physics::Scenes)
+    {
+        if (((ScenePhysX*)e->GetPhysicsScene())->Scene == scene)
+        {
+            scenePhysX = (ScenePhysX*)e->GetPhysicsScene();
+            break;
+        }
+    }
+    if (!scenePhysX)
+        return;
+    scenePhysX->UpdateVehicles(dt);
+#endif
+}
+
 bool PhysicsBackend::Init()
 {
 #define CHECK_INIT(value, msg) if (!value) { LOG(Error, msg); return true; }
@@ -1205,6 +1747,7 @@ void PhysicsBackend::Shutdown()
 void PhysicsBackend::ApplySettings(const PhysicsSettings& settings)
 {
     _queriesHitTriggers = settings.QueriesHitTriggers;
+    _enableCCD = !settings.DisableCCD;
     _frictionCombineMode = settings.FrictionCombineMode;
     _restitutionCombineMode = settings.RestitutionCombineMode;
 
@@ -1241,6 +1784,8 @@ void* PhysicsBackend::CreateScene(const PhysicsSettings& settings)
     sceneDesc.simulationEventCallback = &scenePhysX->EventsCallback;
     sceneDesc.filterShader = FilterShader;
     sceneDesc.bounceThresholdVelocity = settings.BounceThresholdVelocity;
+    if (settings.EnableEnhancedDeterminism)
+        sceneDesc.flags |= PxSceneFlag::eENABLE_ENHANCED_DETERMINISM;
     switch (settings.SolverType)
     {
     case PhysicsSolverType::ProjectedGaussSeidelIterativeSolver:
@@ -1368,300 +1913,6 @@ void PhysicsBackend::EndSimulateScene(void* scene)
         scenePhysX->Stepper.wait(scenePhysX->Scene);
     }
 
-#if WITH_VEHICLE
-    if (scenePhysX->WheelVehicles.HasItems())
-    {
-        PROFILE_CPU_NAMED("Physics.Vehicles");
-
-        // Update vehicles steering
-        WheelVehiclesCache.Clear();
-        WheelVehiclesCache.EnsureCapacity(scenePhysX->WheelVehicles.Count());
-        int32 wheelsCount = 0;
-        for (auto wheelVehicle : scenePhysX->WheelVehicles)
-        {
-            if (!wheelVehicle->IsActiveInHierarchy() || !wheelVehicle->GetEnableSimulation())
-                continue;
-            auto drive = (PxVehicleWheels*)wheelVehicle->_vehicle;
-            ASSERT(drive);
-            WheelVehiclesCache.Add(drive);
-            wheelsCount += drive->mWheelsSimData.getNbWheels();
-
-            float throttle = wheelVehicle->_throttle;
-            float brake = wheelVehicle->_brake;
-            if (wheelVehicle->UseReverseAsBrake)
-            {
-                const float invalidDirectionThreshold = 80.0f;
-                const float breakThreshold = 8.0f;
-                const float forwardSpeed = wheelVehicle->GetForwardSpeed();
-
-                // Automatic gear change when changing driving direction
-                if (Math::Abs(forwardSpeed) < invalidDirectionThreshold)
-                {
-                    if (throttle < -ZeroTolerance && wheelVehicle->GetCurrentGear() >= 0 && wheelVehicle->GetTargetGear() >= 0)
-                    {
-                        wheelVehicle->SetCurrentGear(-1);
-                    }
-                    else if (throttle > ZeroTolerance && wheelVehicle->GetCurrentGear() <= 0 && wheelVehicle->GetTargetGear() <= 0)
-                    {
-                        wheelVehicle->SetCurrentGear(1);
-                    }
-                }
-
-                // Automatic break when changing driving direction
-                if (throttle > 0.0f)
-                {
-                    if (forwardSpeed < -invalidDirectionThreshold)
-                    {
-                        brake = 1.0f;
-                    }
-                }
-                else if (throttle < 0.0f)
-                {
-                    if (forwardSpeed > invalidDirectionThreshold)
-                    {
-                        brake = 1.0f;
-                    }
-                }
-                else
-                {
-                    if (forwardSpeed < breakThreshold && forwardSpeed > -breakThreshold)
-                    {
-                        brake = 1.0f;
-                    }
-                }
-
-                // Block throttle if user is changing driving direction
-                if ((throttle > 0.0f && wheelVehicle->GetTargetGear() < 0) || (throttle < 0.0f && wheelVehicle->GetTargetGear() > 0))
-                {
-                    throttle = 0.0f;
-                }
-
-                throttle = Math::Abs(throttle);
-            }
-            else
-            {
-                throttle = Math::Max(throttle, 0.0f);
-            }
-            // @formatter:off
-            // Reference: PhysX SDK docs
-            // TODO: expose input control smoothing data
-            static constexpr PxVehiclePadSmoothingData padSmoothing =
-            {
-	            {
-		            6.0f,  // rise rate eANALOG_INPUT_ACCEL
-		            6.0f,  // rise rate eANALOG_INPUT_BRAKE
-		            12.0f, // rise rate eANALOG_INPUT_HANDBRAKE
-		            2.5f,  // rise rate eANALOG_INPUT_STEER_LEFT
-		            2.5f,  // rise rate eANALOG_INPUT_STEER_RIGHT
-	            },
-	            {
-		            10.0f, // fall rate eANALOG_INPUT_ACCEL
-		            10.0f, // fall rate eANALOG_INPUT_BRAKE
-		            12.0f, // fall rate eANALOG_INPUT_HANDBRAKE
-		            5.0f,  // fall rate eANALOG_INPUT_STEER_LEFT
-		            5.0f,  // fall rate eANALOG_INPUT_STEER_RIGHT
-	            }
-            };
-            static constexpr PxVehicleKeySmoothingData keySmoothing =
-            {
-                {
-                    3.0f,  // rise rate eANALOG_INPUT_ACCEL
-                    3.0f,  // rise rate eANALOG_INPUT_BRAKE
-                    10.0f, // rise rate eANALOG_INPUT_HANDBRAKE
-                    2.5f,  // rise rate eANALOG_INPUT_STEER_LEFT
-                    2.5f,  // rise rate eANALOG_INPUT_STEER_RIGHT
-                },
-                {
-                    5.0f,  // fall rate eANALOG_INPUT__ACCEL
-                    5.0f,  // fall rate eANALOG_INPUT__BRAKE
-                    10.0f, // fall rate eANALOG_INPUT__HANDBRAKE
-                    5.0f,  // fall rate eANALOG_INPUT_STEER_LEFT
-                    5.0f   // fall rate eANALOG_INPUT_STEER_RIGHT
-                }
-            };
-            // Reference: PhysX SDK docs
-            // TODO: expose steer vs forward curve into per-vehicle (up to 8 points, values clamped into 0/1 range)
-            static constexpr PxF32 steerVsForwardSpeedData[] =
-            {
-	            0.0f,		1.0f,
-	            20.0f,		0.9f,
-	            65.0f,		0.8f,
-	            120.0f,		0.7f,
-	            PX_MAX_F32, PX_MAX_F32,
-	            PX_MAX_F32, PX_MAX_F32,
-	            PX_MAX_F32, PX_MAX_F32,
-	            PX_MAX_F32, PX_MAX_F32,
-            };
-            const PxFixedSizeLookupTable<8> steerVsForwardSpeed(steerVsForwardSpeedData, 4);
-            // @formatter:on
-            if (wheelVehicle->UseAnalogSteering)
-            {
-                switch (wheelVehicle->_driveTypeCurrent)
-                {
-                case WheeledVehicle::DriveTypes::Drive4W:
-                {
-                    PxVehicleDrive4WRawInputData rawInputData;
-                    rawInputData.setAnalogAccel(throttle);
-                    rawInputData.setAnalogBrake(brake);
-                    rawInputData.setAnalogSteer(wheelVehicle->_steering);
-                    rawInputData.setAnalogHandbrake(wheelVehicle->_handBrake);
-                    PxVehicleDrive4WSmoothAnalogRawInputsAndSetAnalogInputs(padSmoothing, steerVsForwardSpeed, rawInputData, scenePhysX->LastDeltaTime, false, *(PxVehicleDrive4W*)drive);
-                    break;
-                }
-                case WheeledVehicle::DriveTypes::DriveNW:
-                {
-                    PxVehicleDriveNWRawInputData rawInputData;
-                    rawInputData.setAnalogAccel(throttle);
-                    rawInputData.setAnalogBrake(brake);
-                    rawInputData.setAnalogSteer(wheelVehicle->_steering);
-                    rawInputData.setAnalogHandbrake(wheelVehicle->_handBrake);
-                    PxVehicleDriveNWSmoothAnalogRawInputsAndSetAnalogInputs(padSmoothing, steerVsForwardSpeed, rawInputData, scenePhysX->LastDeltaTime, false, *(PxVehicleDriveNW*)drive);
-                    break;
-                }
-                }
-            }
-            else
-            {
-                const float deadZone = 0.1f;
-                switch (wheelVehicle->_driveTypeCurrent)
-                {
-                case WheeledVehicle::DriveTypes::Drive4W:
-                {
-                    PxVehicleDrive4WRawInputData rawInputData;
-                    rawInputData.setDigitalAccel(throttle > deadZone);
-                    rawInputData.setDigitalBrake(brake > deadZone);
-                    rawInputData.setDigitalSteerLeft(wheelVehicle->_steering < -deadZone);
-                    rawInputData.setDigitalSteerRight(wheelVehicle->_steering > deadZone);
-                    rawInputData.setDigitalHandbrake(wheelVehicle->_handBrake > deadZone);
-                    PxVehicleDrive4WSmoothDigitalRawInputsAndSetAnalogInputs(keySmoothing, steerVsForwardSpeed, rawInputData, scenePhysX->LastDeltaTime, false, *(PxVehicleDrive4W*)drive);
-                    break;
-                }
-                case WheeledVehicle::DriveTypes::DriveNW:
-                {
-                    PxVehicleDriveNWRawInputData rawInputData;
-                    rawInputData.setDigitalAccel(throttle > deadZone);
-                    rawInputData.setDigitalBrake(brake > deadZone);
-                    rawInputData.setDigitalSteerLeft(wheelVehicle->_steering < -deadZone);
-                    rawInputData.setDigitalSteerRight(wheelVehicle->_steering > deadZone);
-                    rawInputData.setDigitalHandbrake(wheelVehicle->_handBrake > deadZone);
-                    PxVehicleDriveNWSmoothDigitalRawInputsAndSetAnalogInputs(keySmoothing, steerVsForwardSpeed, rawInputData, scenePhysX->LastDeltaTime, false, *(PxVehicleDriveNW*)drive);
-                    break;
-                }
-                }
-            }
-        }
-
-        // Update batches queries cache
-        if (wheelsCount > scenePhysX->WheelRaycastBatchQuerySize)
-        {
-            if (scenePhysX->WheelRaycastBatchQuery)
-                scenePhysX->WheelRaycastBatchQuery->release();
-            scenePhysX->WheelRaycastBatchQuerySize = wheelsCount;
-            scenePhysX->WheelRaycastBatchQuery = PxCreateBatchQueryExt(*scenePhysX->Scene, &WheelRaycastFilter, wheelsCount, wheelsCount, 0, 0, 0, 0);
-        }
-
-        // Update lookup table that maps wheel type into the surface friction
-        if (!WheelTireFrictions || WheelTireFrictionsDirty)
-        {
-            WheelTireFrictionsDirty = false;
-            RELEASE_PHYSX(WheelTireFrictions);
-            Array<PxMaterial*, InlinedAllocation<8>> materials;
-            materials.Resize(Math::Min<int32>((int32)PhysX->getNbMaterials(), PxVehicleDrivableSurfaceToTireFrictionPairs::eMAX_NB_SURFACE_TYPES));
-            PxMaterial** materialsPtr = materials.Get();
-            PhysX->getMaterials(materialsPtr, materials.Count(), 0);
-            Array<PxVehicleDrivableSurfaceType, InlinedAllocation<8>> tireTypes;
-            tireTypes.Resize(materials.Count());
-            PxVehicleDrivableSurfaceType* tireTypesPtr = tireTypes.Get();
-            for (int32 i = 0; i < tireTypes.Count(); i++)
-                tireTypesPtr[i].mType = i;
-            WheelTireFrictions = PxVehicleDrivableSurfaceToTireFrictionPairs::allocate(WheelTireTypes.Count(), materials.Count());
-            WheelTireFrictions->setup(WheelTireTypes.Count(), materials.Count(), (const PxMaterial**)materialsPtr, tireTypesPtr);
-            for (int32 material = 0; material < materials.Count(); material++)
-            {
-                float friction = materialsPtr[material]->getStaticFriction();
-                for (int32 tireType = 0; tireType < WheelTireTypes.Count(); tireType++)
-                {
-                    float scale = WheelTireTypes[tireType];
-                    WheelTireFrictions->setTypePairFriction(material, tireType, friction * scale);
-                }
-            }
-        }
-
-        // Setup cache for wheel states
-        WheelVehiclesResultsPerVehicle.Resize(WheelVehiclesCache.Count(), false);
-        WheelVehiclesResultsPerWheel.Resize(wheelsCount, false);
-        wheelsCount = 0;
-        for (int32 i = 0, ii = 0; i < scenePhysX->WheelVehicles.Count(); i++)
-        {
-            auto wheelVehicle = scenePhysX->WheelVehicles[i];
-            if (!wheelVehicle->IsActiveInHierarchy() || !wheelVehicle->GetEnableSimulation())
-                continue;
-            auto drive = (PxVehicleWheels*)scenePhysX->WheelVehicles[ii]->_vehicle;
-            auto& perVehicle = WheelVehiclesResultsPerVehicle[ii];
-            ii++;
-            perVehicle.nbWheelQueryResults = drive->mWheelsSimData.getNbWheels();
-            perVehicle.wheelQueryResults = WheelVehiclesResultsPerWheel.Get() + wheelsCount;
-            wheelsCount += perVehicle.nbWheelQueryResults;
-        }
-
-        // Update vehicles
-        if (WheelVehiclesCache.Count() != 0)
-        {
-            PxVehicleSuspensionRaycasts(scenePhysX->WheelRaycastBatchQuery, WheelVehiclesCache.Count(), WheelVehiclesCache.Get());
-            PxVehicleUpdates(scenePhysX->LastDeltaTime, scenePhysX->Scene->getGravity(), *WheelTireFrictions, WheelVehiclesCache.Count(), WheelVehiclesCache.Get(), WheelVehiclesResultsPerVehicle.Get());
-        }
-
-        // Synchronize state
-        for (int32 i = 0, ii = 0; i < scenePhysX->WheelVehicles.Count(); i++)
-        {
-            auto wheelVehicle = scenePhysX->WheelVehicles[i];
-            if (!wheelVehicle->IsActiveInHierarchy() || !wheelVehicle->GetEnableSimulation())
-                continue;
-            auto drive = WheelVehiclesCache[ii];
-            auto& perVehicle = WheelVehiclesResultsPerVehicle[ii];
-            ii++;
-#if PHYSX_VEHICLE_DEBUG_TELEMETRY
-            LOG(Info, "Vehicle[{}] Gear={}, RPM={}", ii, wheelVehicle->GetCurrentGear(), (int32)wheelVehicle->GetEngineRotationSpeed());
-#endif
-
-            // Update wheels
-            for (int32 j = 0; j < wheelVehicle->_wheelsData.Count(); j++)
-            {
-                auto& wheelData = wheelVehicle->_wheelsData[j];
-                auto& perWheel = perVehicle.wheelQueryResults[j];
-#if PHYSX_VEHICLE_DEBUG_TELEMETRY
-                LOG(Info, "Vehicle[{}] Wheel[{}] longitudinalSlip={}, lateralSlip={}, suspSpringForce={}", ii, j, Utilities::RoundTo2DecimalPlaces(perWheel.longitudinalSlip), Utilities::RoundTo2DecimalPlaces(perWheel.lateralSlip), (int32)perWheel.suspSpringForce);
-#endif
-
-                auto& state = wheelData.State;
-                state.IsInAir = perWheel.isInAir;
-                state.TireContactCollider = perWheel.tireContactShape ? static_cast<PhysicsColliderActor*>(perWheel.tireContactShape->userData) : nullptr;
-                state.TireContactPoint = P2C(perWheel.tireContactPoint) + scenePhysX->Origin;
-                state.TireContactNormal = P2C(perWheel.tireContactNormal);
-                state.TireFriction = perWheel.tireFriction;
-                state.SteerAngle = RadiansToDegrees * perWheel.steerAngle;
-                state.RotationAngle = -RadiansToDegrees * drive->mWheelsDynData.getWheelRotationAngle(j);
-                state.SuspensionOffset = perWheel.suspJounce;
-#if USE_EDITOR
-                state.SuspensionTraceStart = P2C(perWheel.suspLineStart) + scenePhysX->Origin;
-                state.SuspensionTraceEnd = P2C(perWheel.suspLineStart + perWheel.suspLineDir * perWheel.suspLineLength) + scenePhysX->Origin;
-#endif
-
-                if (!wheelData.Collider)
-                    continue;
-                auto shape = (PxShape*)wheelData.Collider->GetPhysicsShape();
-
-                // Update wheel collider transformation
-                auto localPose = shape->getLocalPose();
-                Transform t = wheelData.Collider->GetLocalTransform();
-                t.Orientation = Quaternion::Euler(-state.RotationAngle, state.SteerAngle, 0) * wheelData.LocalOrientation;
-                t.Translation = P2C(localPose.p) / wheelVehicle->GetScale() - t.Orientation * wheelData.Collider->GetCenter();
-                wheelData.Collider->SetLocalTransform(t);
-            }
-        }
-    }
-#endif
-
     {
         PROFILE_CPU_NAMED("Physics.FlushActiveTransforms");
 
@@ -1683,65 +1934,18 @@ void PhysicsBackend::EndSimulateScene(void* scene)
     }
 
 #if WITH_CLOTH
-    nv::cloth::Solver* clothSolver = scenePhysX->ClothSolver;
-    if (clothSolver && scenePhysX->ClothsList.Count() != 0)
-    {
-        PROFILE_CPU_NAMED("Physics.Cloth");
-
-        {
-            PROFILE_CPU_NAMED("Pre");
-            Function<void(int32)> job;
-            job.Bind<ScenePhysX, &ScenePhysX::PreSimulateCloth>(scenePhysX);
-            JobSystem::Execute(job, scenePhysX->ClothsList.Count());
-        }
-
-        {
-            PROFILE_CPU_NAMED("Simulation");
-            if (clothSolver->beginSimulation(scenePhysX->LastDeltaTime))
-            {
-                Function<void(int32)> job;
-                job.Bind<ScenePhysX, &ScenePhysX::SimulateCloth>(scenePhysX);
-                JobSystem::Execute(job, clothSolver->getSimulationChunkCount());
-                clothSolver->endSimulation();
-            }
-        }
-
-        {
-            PROFILE_CPU_NAMED("Post");
-            ScopeLock lock(ClothLocker);
-            Array<Cloth*> brokenCloths;
-            for (auto clothPhysX : scenePhysX->ClothsList)
-            {
-                const auto& clothSettings = Cloths[clothPhysX];
-                if (clothSettings.Culled)
-                    continue;
-                if (clothSettings.UpdateBounds(clothPhysX))
-                    brokenCloths.Add(clothSettings.Actor);
-                clothSettings.Actor->OnPostUpdate();
-            }
-            for (auto cloth : brokenCloths)
-            {
-                // Rebuild cloth object but keep fabric ref to prevent fabric recook
-                auto fabric = &((nv::cloth::Cloth*)cloth->_cloth)->getFabric();
-                Fabrics[fabric].Refs++;
-                fabric->incRefCount();
-                cloth->Rebuild();
-                fabric->decRefCount();
-                if (--Fabrics[fabric].Refs == 0)
-                    Fabrics.Remove(fabric);
-            }
-        }
-    }
+    scenePhysX->UpdateCloths(scenePhysX->LastDeltaTime);
+#endif
 
     {
         PROFILE_CPU_NAMED("Physics.SendEvents");
-
-        scenePhysX->EventsCallback.CollectResults();
         scenePhysX->EventsCallback.SendTriggerEvents();
         scenePhysX->EventsCallback.SendCollisionEvents();
         scenePhysX->EventsCallback.SendJointEvents();
     }
-#endif
+
+    // Clear delta after simulation ended
+    scenePhysX->LastDeltaTime = 0.0f;
 }
 
 Vector3 PhysicsBackend::GetSceneGravity(void* scene)
@@ -1834,11 +2038,14 @@ void PhysicsBackend::AddSceneActor(void* scene, void* actor)
     FlushLocker.Unlock();
 }
 
-void PhysicsBackend::RemoveSceneActor(void* scene, void* actor)
+void PhysicsBackend::RemoveSceneActor(void* scene, void* actor, bool immediately)
 {
     auto scenePhysX = (ScenePhysX*)scene;
     FlushLocker.Lock();
-    scenePhysX->RemoveActors.Add((PxActor*)actor);
+    if (immediately)
+        scenePhysX->Scene->removeActor(*(PxActor*)actor);
+    else
+        scenePhysX->RemoveActors.Add((PxActor*)actor);
     FlushLocker.Unlock();
 }
 
@@ -1880,14 +2087,14 @@ bool PhysicsBackend::RayCast(void* scene, const Vector3& origin, const Vector3& 
 {
     SCENE_QUERY_SETUP(true);
     PxRaycastBuffer buffer;
-    return scenePhysX->Scene->raycast(C2P(origin - scenePhysX->Origin), C2P(direction), maxDistance, buffer, hitFlags, filterData, &QueryFilter);
+    return scenePhysX->Scene->raycast(C2P(origin - scenePhysX->Origin), C2P(direction), maxDistance, buffer, PxHitFlagEmpty, filterData, &QueryFilter);
 }
 
 bool PhysicsBackend::RayCast(void* scene, const Vector3& origin, const Vector3& direction, RayCastHit& hitInfo, const float maxDistance, uint32 layerMask, bool hitTriggers)
 {
     SCENE_QUERY_SETUP(true);
     PxRaycastBuffer buffer;
-    if (!scenePhysX->Scene->raycast(C2P(origin - scenePhysX->Origin), C2P(direction), maxDistance, buffer, hitFlags, filterData, &QueryFilter))
+    if (!scenePhysX->Scene->raycast(C2P(origin - scenePhysX->Origin), C2P(direction), maxDistance, buffer, SCENE_QUERY_FLAGS, filterData, &QueryFilter))
         return false;
     SCENE_QUERY_COLLECT_SINGLE();
     return true;
@@ -1897,7 +2104,7 @@ bool PhysicsBackend::RayCastAll(void* scene, const Vector3& origin, const Vector
 {
     SCENE_QUERY_SETUP(false);
     DynamicHitBuffer<PxRaycastHit> buffer;
-    if (!scenePhysX->Scene->raycast(C2P(origin - scenePhysX->Origin), C2P(direction), maxDistance, buffer, hitFlags, filterData, &QueryFilter))
+    if (!scenePhysX->Scene->raycast(C2P(origin - scenePhysX->Origin), C2P(direction), maxDistance, buffer, SCENE_QUERY_FLAGS, filterData, &QueryFilter))
         return false;
     SCENE_QUERY_COLLECT_ALL();
     return true;
@@ -1908,7 +2115,7 @@ bool PhysicsBackend::BoxCast(void* scene, const Vector3& center, const Vector3& 
     SCENE_QUERY_SETUP_SWEEP_1();
     const PxTransform pose(C2P(center - scenePhysX->Origin), C2P(rotation));
     const PxBoxGeometry geometry(C2P(halfExtents));
-    return scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, hitFlags, filterData, &QueryFilter);
+    return scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, PxHitFlagEmpty, filterData, &QueryFilter);
 }
 
 bool PhysicsBackend::BoxCast(void* scene, const Vector3& center, const Vector3& halfExtents, const Vector3& direction, RayCastHit& hitInfo, const Quaternion& rotation, const float maxDistance, uint32 layerMask, bool hitTriggers)
@@ -1916,7 +2123,7 @@ bool PhysicsBackend::BoxCast(void* scene, const Vector3& center, const Vector3& 
     SCENE_QUERY_SETUP_SWEEP_1();
     const PxTransform pose(C2P(center - scenePhysX->Origin), C2P(rotation));
     const PxBoxGeometry geometry(C2P(halfExtents));
-    if (!scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, hitFlags, filterData, &QueryFilter))
+    if (!scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, SCENE_QUERY_FLAGS, filterData, &QueryFilter))
         return false;
     SCENE_QUERY_COLLECT_SINGLE();
     return true;
@@ -1927,7 +2134,7 @@ bool PhysicsBackend::BoxCastAll(void* scene, const Vector3& center, const Vector
     SCENE_QUERY_SETUP_SWEEP();
     const PxTransform pose(C2P(center - scenePhysX->Origin), C2P(rotation));
     const PxBoxGeometry geometry(C2P(halfExtents));
-    if (!scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, hitFlags, filterData, &QueryFilter))
+    if (!scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, SCENE_QUERY_FLAGS, filterData, &QueryFilter))
         return false;
     SCENE_QUERY_COLLECT_ALL();
     return true;
@@ -1938,7 +2145,7 @@ bool PhysicsBackend::SphereCast(void* scene, const Vector3& center, const float 
     SCENE_QUERY_SETUP_SWEEP_1();
     const PxTransform pose(C2P(center - scenePhysX->Origin));
     const PxSphereGeometry geometry(radius);
-    return scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, hitFlags, filterData, &QueryFilter);
+    return scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, PxHitFlagEmpty, filterData, &QueryFilter);
 }
 
 bool PhysicsBackend::SphereCast(void* scene, const Vector3& center, const float radius, const Vector3& direction, RayCastHit& hitInfo, const float maxDistance, uint32 layerMask, bool hitTriggers)
@@ -1946,7 +2153,7 @@ bool PhysicsBackend::SphereCast(void* scene, const Vector3& center, const float 
     SCENE_QUERY_SETUP_SWEEP_1();
     const PxTransform pose(C2P(center - scenePhysX->Origin));
     const PxSphereGeometry geometry(radius);
-    if (!scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, hitFlags, filterData, &QueryFilter))
+    if (!scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, SCENE_QUERY_FLAGS, filterData, &QueryFilter))
         return false;
     SCENE_QUERY_COLLECT_SINGLE();
     return true;
@@ -1957,7 +2164,7 @@ bool PhysicsBackend::SphereCastAll(void* scene, const Vector3& center, const flo
     SCENE_QUERY_SETUP_SWEEP();
     const PxTransform pose(C2P(center - scenePhysX->Origin));
     const PxSphereGeometry geometry(radius);
-    if (!scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, hitFlags, filterData, &QueryFilter))
+    if (!scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, SCENE_QUERY_FLAGS, filterData, &QueryFilter))
         return false;
     SCENE_QUERY_COLLECT_ALL();
     return true;
@@ -1968,7 +2175,7 @@ bool PhysicsBackend::CapsuleCast(void* scene, const Vector3& center, const float
     SCENE_QUERY_SETUP_SWEEP_1();
     const PxTransform pose(C2P(center - scenePhysX->Origin), C2P(rotation));
     const PxCapsuleGeometry geometry(radius, height * 0.5f);
-    return scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, hitFlags, filterData, &QueryFilter);
+    return scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, PxHitFlagEmpty, filterData, &QueryFilter);
 }
 
 bool PhysicsBackend::CapsuleCast(void* scene, const Vector3& center, const float radius, const float height, const Vector3& direction, RayCastHit& hitInfo, const Quaternion& rotation, const float maxDistance, uint32 layerMask, bool hitTriggers)
@@ -1976,7 +2183,7 @@ bool PhysicsBackend::CapsuleCast(void* scene, const Vector3& center, const float
     SCENE_QUERY_SETUP_SWEEP_1();
     const PxTransform pose(C2P(center - scenePhysX->Origin), C2P(rotation));
     const PxCapsuleGeometry geometry(radius, height * 0.5f);
-    if (!scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, hitFlags, filterData, &QueryFilter))
+    if (!scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, SCENE_QUERY_FLAGS, filterData, &QueryFilter))
         return false;
     SCENE_QUERY_COLLECT_SINGLE();
     return true;
@@ -1987,7 +2194,7 @@ bool PhysicsBackend::CapsuleCastAll(void* scene, const Vector3& center, const fl
     SCENE_QUERY_SETUP_SWEEP();
     const PxTransform pose(C2P(center - scenePhysX->Origin), C2P(rotation));
     const PxCapsuleGeometry geometry(radius, height * 0.5f);
-    if (!scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, hitFlags, filterData, &QueryFilter))
+    if (!scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, SCENE_QUERY_FLAGS, filterData, &QueryFilter))
         return false;
     SCENE_QUERY_COLLECT_ALL();
     return true;
@@ -1999,7 +2206,7 @@ bool PhysicsBackend::ConvexCast(void* scene, const Vector3& center, const Collis
     SCENE_QUERY_SETUP_SWEEP_1();
     const PxTransform pose(C2P(center - scenePhysX->Origin), C2P(rotation));
     const PxConvexMeshGeometry geometry((PxConvexMesh*)convexMesh->GetConvex(), PxMeshScale(C2P(scale)));
-    return scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, hitFlags, filterData, &QueryFilter);
+    return scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, PxHitFlagEmpty, filterData, &QueryFilter);
 }
 
 bool PhysicsBackend::ConvexCast(void* scene, const Vector3& center, const CollisionData* convexMesh, const Vector3& scale, const Vector3& direction, RayCastHit& hitInfo, const Quaternion& rotation, const float maxDistance, uint32 layerMask, bool hitTriggers)
@@ -2008,7 +2215,7 @@ bool PhysicsBackend::ConvexCast(void* scene, const Vector3& center, const Collis
     SCENE_QUERY_SETUP_SWEEP_1();
     const PxTransform pose(C2P(center - scenePhysX->Origin), C2P(rotation));
     const PxConvexMeshGeometry geometry((PxConvexMesh*)convexMesh->GetConvex(), PxMeshScale(C2P(scale)));
-    if (!scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, hitFlags, filterData, &QueryFilter))
+    if (!scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, SCENE_QUERY_FLAGS, filterData, &QueryFilter))
         return false;
     SCENE_QUERY_COLLECT_SINGLE();
     return true;
@@ -2020,7 +2227,7 @@ bool PhysicsBackend::ConvexCastAll(void* scene, const Vector3& center, const Col
     SCENE_QUERY_SETUP_SWEEP();
     const PxTransform pose(C2P(center - scenePhysX->Origin), C2P(rotation));
     const PxConvexMeshGeometry geometry((PxConvexMesh*)convexMesh->GetConvex(), PxMeshScale(C2P(scale)));
-    if (!scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, hitFlags, filterData, &QueryFilter))
+    if (!scenePhysX->Scene->sweep(geometry, pose, C2P(direction), maxDistance, buffer, SCENE_QUERY_FLAGS, filterData, &QueryFilter))
         return false;
     SCENE_QUERY_COLLECT_ALL();
     return true;
@@ -2266,7 +2473,7 @@ void PhysicsBackend::SetRigidActorPose(void* actor, const Vector3& position, con
             actorPhysX->setGlobalPose(trans, wakeUp);
         }
         else
-            actorPhysX->setKinematicTarget(trans); 
+            actorPhysX->setKinematicTarget(trans);
     }
     else
     {
@@ -2451,17 +2658,14 @@ void PhysicsBackend::AddRigidDynamicActorTorque(void* actor, const Vector3& torq
     actorPhysX->addTorque(C2P(torque), static_cast<PxForceMode::Enum>(mode));
 }
 
-void* PhysicsBackend::CreateShape(PhysicsColliderActor* collider, const CollisionShape& geometry, JsonAsset* material, bool enabled, bool trigger)
+void* PhysicsBackend::CreateShape(PhysicsColliderActor* collider, const CollisionShape& geometry, Span<JsonAsset*> materials, bool enabled, bool trigger)
 {
     const PxShapeFlags shapeFlags = GetShapeFlags(trigger, enabled);
-    PxMaterial* materialPhysX = DefaultMaterial;
-    if (material && !material->WaitForLoaded() && material->Instance)
-    {
-        materialPhysX = (PxMaterial*)((PhysicalMaterial*)material->Instance)->GetPhysicsMaterial();
-    }
+    Array<PxMaterial*, InlinedAllocation<1>> materialsPhysX;
+    GetShapeMaterials(materialsPhysX, materials);
     PxGeometryHolder geometryPhysX;
     GetShapeGeometry(geometry, geometryPhysX);
-    PxShape* shapePhysX = PhysX->createShape(geometryPhysX.any(), *materialPhysX, true, shapeFlags);
+    PxShape* shapePhysX = PhysX->createShape(geometryPhysX.any(), materialsPhysX.Get(), materialsPhysX.Count(), true, shapeFlags);
     shapePhysX->userData = collider;
 #if PHYSX_DEBUG_NAMING
     shapePhysX->setName("Shape");
@@ -2551,15 +2755,12 @@ void PhysicsBackend::SetShapeContactOffset(void* shape, float value)
     shapePhysX->setContactOffset(Math::Max(shapePhysX->getRestOffset() + ZeroTolerance, value));
 }
 
-void PhysicsBackend::SetShapeMaterial(void* shape, JsonAsset* material)
+void PhysicsBackend::SetShapeMaterials(void* shape, Span<JsonAsset*> materials)
 {
     auto shapePhysX = (PxShape*)shape;
-    PxMaterial* materialPhysX = DefaultMaterial;
-    if (material && !material->WaitForLoaded() && material->Instance)
-    {
-        materialPhysX = (PxMaterial*)((PhysicalMaterial*)material->Instance)->GetPhysicsMaterial();
-    }
-    shapePhysX->setMaterials(&materialPhysX, 1);
+    Array<PxMaterial*, InlinedAllocation<1>> materialsPhysX;
+    GetShapeMaterials(materialsPhysX, materials);
+    shapePhysX->setMaterials(materialsPhysX.Get(), materialsPhysX.Count());
 }
 
 void PhysicsBackend::SetShapeGeometry(void* shape, const CollisionShape& geometry)
@@ -2600,7 +2801,14 @@ float PhysicsBackend::ComputeShapeSqrDistanceToPoint(void* shape, const Vector3&
 {
     auto shapePhysX = (PxShape*)shape;
     const PxTransform trans(C2P(position), C2P(orientation));
+#if USE_LARGE_WORLDS
+    PxVec3 closestPointPx;
+    float result = PxGeometryQuery::pointDistance(C2P(point), shapePhysX->getGeometry(), trans, &closestPointPx);
+    *closestPoint = P2C(closestPointPx);
+    return result;
+#else
     return PxGeometryQuery::pointDistance(C2P(point), shapePhysX->getGeometry(), trans, (PxVec3*)closestPoint);
+#endif
 }
 
 bool PhysicsBackend::RayCastShape(void* shape, const Vector3& position, const Quaternion& orientation, const Vector3& origin, const Vector3& direction, float& resultHitDistance, float maxDistance)
@@ -2608,9 +2816,8 @@ bool PhysicsBackend::RayCastShape(void* shape, const Vector3& position, const Qu
     auto shapePhysX = (PxShape*)shape;
     const Vector3 sceneOrigin = SceneOrigins[shapePhysX->getActor() ? shapePhysX->getActor()->getScene() : nullptr];
     const PxTransform trans(C2P(position - sceneOrigin), C2P(orientation));
-    const PxHitFlags hitFlags = (PxHitFlags)0;
     PxRaycastHit hit;
-    if (PxGeometryQuery::raycast(C2P(origin - sceneOrigin), C2P(direction), shapePhysX->getGeometry(), trans, maxDistance, hitFlags, 1, &hit) != 0)
+    if (PxGeometryQuery::raycast(C2P(origin - sceneOrigin), C2P(direction), shapePhysX->getGeometry(), trans, maxDistance, PxHitFlagEmpty, 1, &hit) != 0)
     {
         resultHitDistance = hit.distance;
         return true;
@@ -2623,10 +2830,10 @@ bool PhysicsBackend::RayCastShape(void* shape, const Vector3& position, const Qu
     auto shapePhysX = (PxShape*)shape;
     const Vector3 sceneOrigin = SceneOrigins[shapePhysX->getActor() ? shapePhysX->getActor()->getScene() : nullptr];
     const PxTransform trans(C2P(position - sceneOrigin), C2P(orientation));
-    const PxHitFlags hitFlags = PxHitFlag::ePOSITION | PxHitFlag::eNORMAL | PxHitFlag::eFACE_INDEX | PxHitFlag::eUV;
     PxRaycastHit hit;
-    if (PxGeometryQuery::raycast(C2P(origin - sceneOrigin), C2P(direction), shapePhysX->getGeometry(), trans, maxDistance, hitFlags, 1, &hit) == 0)
+    if (PxGeometryQuery::raycast(C2P(origin - sceneOrigin), C2P(direction), shapePhysX->getGeometry(), trans, maxDistance, SCENE_QUERY_FLAGS, 1, &hit) == 0)
         return false;
+    hit.shape = shapePhysX;
     P2C(hit, hitInfo);
     hitInfo.Point += sceneOrigin;
     return true;
@@ -3004,7 +3211,7 @@ void* PhysicsBackend::CreateController(void* scene, IPhysicsActor* actor, Physic
         desc.material = DefaultMaterial;
     const float minSize = 0.001f;
     desc.height = Math::Max(height, minSize);
-    desc.radius = Math::Max(radius - desc.contactOffset, minSize);
+    desc.radius = Math::Max(radius - Math::Max(contactOffset, 0.0f), minSize);
     desc.stepOffset = Math::Min(stepOffset, desc.height + desc.radius * 2.0f - minSize);
     auto controllerPhysX = (PxCapsuleController*)scenePhysX->ControllerManager->createController(desc);
     PxRigidActor* actorPhysX = controllerPhysX->getActor();
@@ -3092,20 +3299,161 @@ int32 PhysicsBackend::MoveController(void* controller, void* shape, const Vector
 
 #if WITH_VEHICLE
 
-bool SortWheels(WheeledVehicle::Wheel const& a, WheeledVehicle::Wheel const& b)
+PxVehicleDifferential4WData CreatePxVehicleDifferential4WData(const WheeledVehicle::DifferentialSettings& settings)
 {
-    return (int32)a.Type < (int32)b.Type;
+    PxVehicleDifferential4WData differential4WData;
+    differential4WData.mType = (PxVehicleDifferential4WData::Enum)settings.Type;
+    differential4WData.mFrontRearSplit = settings.FrontRearSplit;
+    differential4WData.mFrontLeftRightSplit = settings.FrontLeftRightSplit;
+    differential4WData.mRearLeftRightSplit = settings.RearLeftRightSplit;
+    differential4WData.mCentreBias = settings.CentreBias;
+    differential4WData.mFrontBias = settings.FrontBias;
+    differential4WData.mRearBias = settings.RearBias;
+    return differential4WData;
+}
+
+PxVehicleDifferentialNWData CreatePxVehicleDifferentialNWData(const WheeledVehicle::DifferentialSettings& settings, const Array<WheeledVehicle::Wheel*, FixedAllocation<PX_MAX_NB_WHEELS>>& wheels)
+{
+    PxVehicleDifferentialNWData differentialNwData;
+    for (int32 i = 0; i < wheels.Count(); i++)
+        differentialNwData.setDrivenWheel(i, true);
+    return differentialNwData;
+}
+
+PxVehicleEngineData CreatePxVehicleEngineData(const WheeledVehicle::EngineSettings& settings)
+{
+    PxVehicleEngineData engineData;
+    engineData.mMOI = M2ToCm2(settings.MOI);
+    engineData.mPeakTorque = M2ToCm2(settings.MaxTorque);
+    engineData.mMaxOmega = RpmToRadPerS(settings.MaxRotationSpeed);
+    engineData.mDampingRateFullThrottle = M2ToCm2(0.15f);
+    engineData.mDampingRateZeroThrottleClutchEngaged = M2ToCm2(2.0f);
+    engineData.mDampingRateZeroThrottleClutchDisengaged = M2ToCm2(0.35f);
+    return engineData;
+}
+
+PxVehicleGearsData CreatePxVehicleGearsData(const WheeledVehicle::GearboxSettings& settings)
+{
+    PxVehicleGearsData gears;
+
+    // Total gears is forward gears + neutral/rear gears
+    const int32 gearsCount = Math::Clamp<int32>(settings.ForwardGearsRatios + 2, 2, PxVehicleGearsData::eGEARSRATIO_COUNT);
+
+    // Setup gears torque/top speed relations
+    // Higher torque = less speed
+    // Low torque = high speed
+
+    // Example:
+    // ForwardGearsRatios = 4
+    // GearRev = -5
+    // Gear0 = 0  
+    // Gear1 = 4.2
+    // Gear2 = 3.4
+    // Gear3 = 2.6
+    // Gear4 = 1.8
+    // Gear5 = 1
+
+    gears.mRatios[0] = (float)-(gearsCount - 2); // Reverse
+    gears.mRatios[1] = 0; // Neutral
+
+    // Setup all gears except neutral and reverse
+    for (int32 i = gearsCount; i > 2; i--)
+    {
+        float gearsRatios = (float)settings.ForwardGearsRatios;
+        float currentGear = i - 2.0f;
+        gears.mRatios[i] = Math::Lerp(gearsRatios, 1.0f, currentGear / gearsRatios);
+    }
+
+    // Reset unused gears
+    for (int32 i = gearsCount; i < PxVehicleGearsData::eGEARSRATIO_COUNT; i++)
+        gears.mRatios[i] = 0;
+
+    gears.mSwitchTime = Math::Max(settings.SwitchTime, 0.0f);
+    gears.mNbRatios = gearsCount;
+    return gears;
+}
+
+PxVehicleAutoBoxData CreatePxVehicleAutoBoxData()
+{
+    return PxVehicleAutoBoxData();
+}
+
+PxVehicleClutchData CreatePxVehicleClutchData(const WheeledVehicle::GearboxSettings& settings)
+{
+    PxVehicleClutchData clutch;
+    clutch.mStrength = M2ToCm2(settings.ClutchStrength);
+    return clutch;
+}
+
+PxVehicleSuspensionData CreatePxVehicleSuspensionData(const WheeledVehicle::Wheel& settings, const PxReal wheelSprungMass)
+{
+    PxVehicleSuspensionData suspensionData;
+    const float suspensionFrequency = 7.0f;
+    suspensionData.mMaxCompression = settings.SuspensionMaxRaise;
+    suspensionData.mMaxDroop = settings.SuspensionMaxDrop;
+    suspensionData.mSprungMass = wheelSprungMass * settings.SprungMassMultiplier;
+    suspensionData.mSpringStrength = Math::Square(suspensionFrequency) * suspensionData.mSprungMass;
+    suspensionData.mSpringDamperRate = settings.SuspensionDampingRate * 2.0f * Math::Sqrt(suspensionData.mSpringStrength * suspensionData.mSprungMass);
+    return suspensionData;
+}
+
+PxVehicleTireData CreatePxVehicleTireData(const WheeledVehicle::Wheel& settings)
+{
+    PxVehicleTireData tire;
+    int32 tireIndex = WheelTireTypes.Find(settings.TireFrictionScale);
+    if (tireIndex == -1)
+    {
+        // New tire type
+        tireIndex = WheelTireTypes.Count();
+        WheelTireTypes.Add(settings.TireFrictionScale);
+        WheelTireFrictionsDirty = true;
+    }
+    tire.mType = tireIndex;
+    tire.mLatStiffX = settings.TireLateralMax;
+    tire.mLatStiffY = settings.TireLateralStiffness;
+    tire.mLongitudinalStiffnessPerUnitGravity = settings.TireLongitudinalStiffness;
+    return tire;
+}
+
+PxVehicleWheelData CreatePxVehicleWheelData(const WheeledVehicle::Wheel& settings)
+{
+    PxVehicleWheelData wheelData;
+    wheelData.mMass = settings.Mass;
+    wheelData.mRadius = settings.Radius;
+    wheelData.mWidth = settings.Width;
+    wheelData.mMOI = 0.5f * wheelData.mMass * Math::Square(wheelData.mRadius);
+    wheelData.mDampingRate = M2ToCm2(settings.DampingRate);
+    wheelData.mMaxSteer = settings.MaxSteerAngle * DegreesToRadians;
+    wheelData.mMaxBrakeTorque = M2ToCm2(settings.MaxBrakeTorque);
+    wheelData.mMaxHandBrakeTorque = M2ToCm2(settings.MaxHandBrakeTorque);
+    return wheelData;
+}
+
+PxVehicleAckermannGeometryData CreatePxVehicleAckermannGeometryData(PxVehicleWheelsSimData* wheelsSimData)
+{
+    PxVehicleAckermannGeometryData ackermann;
+    ackermann.mAxleSeparation = Math::Abs(wheelsSimData->getWheelCentreOffset(PxVehicleDrive4WWheelOrder::eFRONT_LEFT).z - wheelsSimData->getWheelCentreOffset(PxVehicleDrive4WWheelOrder::eREAR_LEFT).z);
+    ackermann.mFrontWidth = Math::Abs(wheelsSimData->getWheelCentreOffset(PxVehicleDrive4WWheelOrder::eFRONT_RIGHT).x - wheelsSimData->getWheelCentreOffset(PxVehicleDrive4WWheelOrder::eFRONT_LEFT).x);
+    ackermann.mRearWidth = Math::Abs(wheelsSimData->getWheelCentreOffset(PxVehicleDrive4WWheelOrder::eREAR_RIGHT).x - wheelsSimData->getWheelCentreOffset(PxVehicleDrive4WWheelOrder::eREAR_LEFT).x);
+    return ackermann;
+}
+
+PxVehicleAntiRollBarData CreatePxPxVehicleAntiRollBarData(const WheeledVehicle::AntiRollBar& settings, int32 leftWheelIndex, int32 rightWheelIndex)
+{
+    PxVehicleAntiRollBarData antiRollBar;
+    antiRollBar.mWheel0 = leftWheelIndex;
+    antiRollBar.mWheel1 = rightWheelIndex;
+    antiRollBar.mStiffness = settings.Stiffness;
+    return antiRollBar;
+}
+
+bool SortWheelsFrontToBack(WheeledVehicle::Wheel* const& a, WheeledVehicle::Wheel* const& b)
+{
+    return a->Collider && b->Collider && a->Collider->GetLocalPosition().Z > b->Collider->GetLocalPosition().Z;
 }
 
 void* PhysicsBackend::CreateVehicle(WheeledVehicle* actor)
 {
-    // TODO: handle PxVehicleDrive4WWheelOrder internally rather than sorting wheels directly on the vehicle
-    if (actor->_driveType == WheeledVehicle::DriveTypes::Drive4W)
-    {
-        // Drive4W requires wheels to match order from PxVehicleDrive4WWheelOrder enum
-        Sorting::QuickSort(actor->_wheels.Get(), actor->_wheels.Count(), SortWheels);
-    }
-
     // Get wheels
     Array<WheeledVehicle::Wheel*, FixedAllocation<PX_MAX_NB_WHEELS>> wheels;
     for (auto& wheel : actor->_wheels)
@@ -3136,6 +3484,33 @@ void* PhysicsBackend::CreateVehicle(WheeledVehicle* actor)
         // No woman, no cry
         return nullptr;
     }
+
+    // Physx vehicles needs to have all wheels sorted to apply controls correctly.
+    // Its needs to know what wheels are on front to turn wheel to correctly side
+    // and needs to know wheel side to apply throttle to correctly direction for each track when using tanks.
+    // Anti roll bars needs to have all wheels sorted to get correctly wheel index too.
+    if (actor->_driveType != WheeledVehicle::DriveTypes::NoDrive)
+    {
+        Sorting::QuickSort(wheels.Get(), wheels.Count(), SortWheelsFrontToBack);
+
+        // Sort wheels by side
+        if (actor->_driveType == WheeledVehicle::DriveTypes::Tank)
+        {
+            for (int32 i = 0; i < wheels.Count() - 1; i += 2)
+            {
+                auto a = wheels[i];
+                auto b = wheels[i + 1];
+                if (!a->Collider || !b->Collider)
+                    continue;
+                if (a->Collider->GetLocalPosition().X > b->Collider->GetLocalPosition().X)
+                {
+                    wheels[i] = b;
+                    wheels[i + 1] = a;
+                }
+            }
+        }
+    }
+    
     actor->_wheelsData.Resize(wheels.Count());
     auto actorPhysX = (PxRigidDynamic*)actor->GetPhysicsActor();
 
@@ -3145,7 +3520,8 @@ void* PhysicsBackend::CreateVehicle(WheeledVehicle* actor)
     Array<PxShape*, InlinedAllocation<8>> shapes;
     shapes.Resize(actorPhysX->getNbShapes());
     actorPhysX->getShapes(shapes.Get(), shapes.Count(), 0);
-    const PxTransform centerOfMassOffset = actorPhysX->getCMassLocalPose();
+    PxTransform centerOfMassOffset = actorPhysX->getCMassLocalPose();
+    centerOfMassOffset.q = PxQuat(PxIdentity);
 
     // Initialize wheels simulation data
     PxVec3 offsets[PX_MAX_NB_WHEELS];
@@ -3156,7 +3532,8 @@ void* PhysicsBackend::CreateVehicle(WheeledVehicle* actor)
     // TODO: get gravityDirection from scenePhysX->Scene->getGravity()
     PxVehicleComputeSprungMasses(wheels.Count(), offsets, centerOfMassOffset.p, mass, 1, sprungMasses);
     PxVehicleWheelsSimData* wheelsSimData = PxVehicleWheelsSimData::allocate(wheels.Count());
-    for (int32 i = 0; i < wheels.Count(); i++)
+    int32 wheelsCount = wheels.Count();
+    for (int32 i = 0; i < wheelsCount; i++)
     {
         auto& wheel = *wheels[i];
 
@@ -3164,42 +3541,14 @@ void* PhysicsBackend::CreateVehicle(WheeledVehicle* actor)
         data.Collider = wheel.Collider;
         data.LocalOrientation = wheel.Collider->GetLocalOrientation();
 
-        PxVehicleSuspensionData suspensionData;
-        const float suspensionFrequency = 7.0f;
-        suspensionData.mMaxCompression = wheel.SuspensionMaxRaise;
-        suspensionData.mMaxDroop = wheel.SuspensionMaxDrop;
-        suspensionData.mSprungMass = sprungMasses[i];
-        suspensionData.mSpringStrength = Math::Square(suspensionFrequency) * suspensionData.mSprungMass;
-        suspensionData.mSpringDamperRate = wheel.SuspensionDampingRate * 2.0f * Math::Sqrt(suspensionData.mSpringStrength * suspensionData.mSprungMass);
-
-        PxVehicleTireData tire;
-        int32 tireIndex = WheelTireTypes.Find(wheel.TireFrictionScale);
-        if (tireIndex == -1)
-        {
-            // New tire type
-            tireIndex = WheelTireTypes.Count();
-            WheelTireTypes.Add(wheel.TireFrictionScale);
-            WheelTireFrictionsDirty = true;
-        }
-        tire.mType = tireIndex;
-        tire.mLatStiffX = wheel.TireLateralMax;
-        tire.mLatStiffY = wheel.TireLateralStiffness;
-        tire.mLongitudinalStiffnessPerUnitGravity = wheel.TireLongitudinalStiffness;
-
-        PxVehicleWheelData wheelData;
-        wheelData.mMass = wheel.Mass;
-        wheelData.mRadius = wheel.Radius;
-        wheelData.mWidth = wheel.Width;
-        wheelData.mMOI = 0.5f * wheelData.mMass * Math::Square(wheelData.mRadius);
-        wheelData.mDampingRate = M2ToCm2(wheel.DampingRate);
-        wheelData.mMaxSteer = wheel.MaxSteerAngle * DegreesToRadians;
-        wheelData.mMaxBrakeTorque = M2ToCm2(wheel.MaxBrakeTorque);
-        wheelData.mMaxHandBrakeTorque = M2ToCm2(wheel.MaxHandBrakeTorque);
-
         PxVec3 centreOffset = centerOfMassOffset.transformInv(offsets[i]);
         PxVec3 forceAppPointOffset(centreOffset.x, wheel.SuspensionForceOffset, centreOffset.z);
 
-        wheelsSimData->setTireData(i, tire);
+        const PxVehicleTireData& tireData = CreatePxVehicleTireData(wheel);
+        const PxVehicleWheelData& wheelData = CreatePxVehicleWheelData(wheel);
+        const PxVehicleSuspensionData& suspensionData = CreatePxVehicleSuspensionData(wheel, sprungMasses[i]);
+
+        wheelsSimData->setTireData(i, tireData);
         wheelsSimData->setWheelData(i, wheelData);
         wheelsSimData->setSuspensionData(i, suspensionData);
         wheelsSimData->setSuspTravelDirection(i, centerOfMassOffset.rotate(PxVec3(0.0f, -1.0f, 0.0f)));
@@ -3229,6 +3578,18 @@ void* PhysicsBackend::CreateVehicle(WheeledVehicle* actor)
             wheelsSimData->setWheelShapeMapping(i, -1);
             wheelsSimData->disableWheel(i);
         }
+    }
+    // Add Anti roll bars for wheels axles
+    for (int32 i = 0; i < actor->GetAntiRollBars().Count(); i++)
+    {
+        int32 axleIndex = actor->GetAntiRollBars()[i].Axle;
+        int32 leftWheelIndex = axleIndex * 2;
+        int32 rightWheelIndex = leftWheelIndex + 1;
+        if (leftWheelIndex >= wheelsCount || rightWheelIndex >= wheelsCount)
+            continue;
+
+        const PxVehicleAntiRollBarData& antiRollBar = CreatePxPxVehicleAntiRollBarData(actor->GetAntiRollBars()[i], leftWheelIndex, rightWheelIndex);
+        wheelsSimData->addAntiRollBarData(antiRollBar);
     }
     for (auto child : actor->Children)
     {
@@ -3266,48 +3627,19 @@ void* PhysicsBackend::CreateVehicle(WheeledVehicle* actor)
     case WheeledVehicle::DriveTypes::Drive4W:
     {
         PxVehicleDriveSimData4W driveSimData;
+        const PxVehicleDifferential4WData& differentialData = CreatePxVehicleDifferential4WData(differential);
+        const PxVehicleEngineData& engineData = CreatePxVehicleEngineData(engine);
+        const PxVehicleGearsData& gearsData = CreatePxVehicleGearsData(gearbox);
+        const PxVehicleAutoBoxData& autoBoxData = CreatePxVehicleAutoBoxData();
+        const PxVehicleClutchData& clutchData = CreatePxVehicleClutchData(gearbox);
+        const PxVehicleAckermannGeometryData& geometryData = CreatePxVehicleAckermannGeometryData(wheelsSimData);
 
-        // Differential
-        PxVehicleDifferential4WData differential4WData;
-        differential4WData.mType = (PxVehicleDifferential4WData::Enum)differential.Type;
-        differential4WData.mFrontRearSplit = differential.FrontRearSplit;
-        differential4WData.mFrontLeftRightSplit = differential.FrontLeftRightSplit;
-        differential4WData.mRearLeftRightSplit = differential.RearLeftRightSplit;
-        differential4WData.mCentreBias = differential.CentreBias;
-        differential4WData.mFrontBias = differential.FrontBias;
-        differential4WData.mRearBias = differential.RearBias;
-        driveSimData.setDiffData(differential4WData);
-
-        // Engine
-        PxVehicleEngineData engineData;
-        engineData.mMOI = M2ToCm2(engine.MOI);
-        engineData.mPeakTorque = M2ToCm2(engine.MaxTorque);
-        engineData.mMaxOmega = RpmToRadPerS(engine.MaxRotationSpeed);
-        engineData.mDampingRateFullThrottle = M2ToCm2(0.15f);
-        engineData.mDampingRateZeroThrottleClutchEngaged = M2ToCm2(2.0f);
-        engineData.mDampingRateZeroThrottleClutchDisengaged = M2ToCm2(0.35f);
+        driveSimData.setDiffData(differentialData);
         driveSimData.setEngineData(engineData);
-
-        // Gears
-        PxVehicleGearsData gears;
-        gears.mSwitchTime = Math::Max(gearbox.SwitchTime, 0.0f);
-        driveSimData.setGearsData(gears);
-
-        // Auto Box
-        PxVehicleAutoBoxData autoBox;
-        driveSimData.setAutoBoxData(autoBox);
-
-        // Clutch
-        PxVehicleClutchData clutch;
-        clutch.mStrength = M2ToCm2(gearbox.ClutchStrength);
-        driveSimData.setClutchData(clutch);
-
-        // Ackermann steer accuracy
-        PxVehicleAckermannGeometryData ackermann;
-        ackermann.mAxleSeparation = Math::Abs(wheelsSimData->getWheelCentreOffset(PxVehicleDrive4WWheelOrder::eFRONT_LEFT).z - wheelsSimData->getWheelCentreOffset(PxVehicleDrive4WWheelOrder::eREAR_LEFT).z);
-        ackermann.mFrontWidth = Math::Abs(wheelsSimData->getWheelCentreOffset(PxVehicleDrive4WWheelOrder::eFRONT_RIGHT).x - wheelsSimData->getWheelCentreOffset(PxVehicleDrive4WWheelOrder::eFRONT_LEFT).x);
-        ackermann.mRearWidth = Math::Abs(wheelsSimData->getWheelCentreOffset(PxVehicleDrive4WWheelOrder::eREAR_RIGHT).x - wheelsSimData->getWheelCentreOffset(PxVehicleDrive4WWheelOrder::eREAR_LEFT).x);
-        driveSimData.setAckermannGeometryData(ackermann);
+        driveSimData.setGearsData(gearsData);
+        driveSimData.setAutoBoxData(autoBoxData);
+        driveSimData.setClutchData(clutchData);
+        driveSimData.setAckermannGeometryData(geometryData);
 
         // Create vehicle drive
         auto drive4W = PxVehicleDrive4W::allocate(wheels.Count());
@@ -3320,36 +3652,17 @@ void* PhysicsBackend::CreateVehicle(WheeledVehicle* actor)
     case WheeledVehicle::DriveTypes::DriveNW:
     {
         PxVehicleDriveSimDataNW driveSimData;
+        const PxVehicleDifferentialNWData& differentialData = CreatePxVehicleDifferentialNWData(differential, wheels);
+        const PxVehicleEngineData& engineData = CreatePxVehicleEngineData(engine);
+        const PxVehicleGearsData& gearsData = CreatePxVehicleGearsData(gearbox);
+        const PxVehicleAutoBoxData& autoBoxData = CreatePxVehicleAutoBoxData();
+        const PxVehicleClutchData& clutchData = CreatePxVehicleClutchData(gearbox);
 
-        // Differential
-        PxVehicleDifferentialNWData differentialNwData;
-        for (int32 i = 0; i < wheels.Count(); i++)
-            differentialNwData.setDrivenWheel(i, true);
-        driveSimData.setDiffData(differentialNwData);
-
-        // Engine
-        PxVehicleEngineData engineData;
-        engineData.mMOI = M2ToCm2(engine.MOI);
-        engineData.mPeakTorque = M2ToCm2(engine.MaxTorque);
-        engineData.mMaxOmega = RpmToRadPerS(engine.MaxRotationSpeed);
-        engineData.mDampingRateFullThrottle = M2ToCm2(0.15f);
-        engineData.mDampingRateZeroThrottleClutchEngaged = M2ToCm2(2.0f);
-        engineData.mDampingRateZeroThrottleClutchDisengaged = M2ToCm2(0.35f);
+        driveSimData.setDiffData(differentialData);
         driveSimData.setEngineData(engineData);
-
-        // Gears
-        PxVehicleGearsData gears;
-        gears.mSwitchTime = Math::Max(gearbox.SwitchTime, 0.0f);
-        driveSimData.setGearsData(gears);
-
-        // Auto Box
-        PxVehicleAutoBoxData autoBox;
-        driveSimData.setAutoBoxData(autoBox);
-
-        // Clutch
-        PxVehicleClutchData clutch;
-        clutch.mStrength = M2ToCm2(gearbox.ClutchStrength);
-        driveSimData.setClutchData(clutch);
+        driveSimData.setGearsData(gearsData);
+        driveSimData.setAutoBoxData(autoBoxData);
+        driveSimData.setClutchData(clutchData);
 
         // Create vehicle drive
         auto driveNW = PxVehicleDriveNW::allocate(wheels.Count());
@@ -3365,6 +3678,31 @@ void* PhysicsBackend::CreateVehicle(WheeledVehicle* actor)
         auto driveNo = PxVehicleNoDrive::allocate(wheels.Count());
         driveNo->setup(PhysX, actorPhysX, *wheelsSimData);
         vehicle = driveNo;
+        break;
+    }
+    case WheeledVehicle::DriveTypes::Tank:
+    {
+        PxVehicleDriveSimData4W driveSimData;
+        const PxVehicleDifferential4WData& differentialData = CreatePxVehicleDifferential4WData(differential);
+        const PxVehicleEngineData& engineData = CreatePxVehicleEngineData(engine);
+        const PxVehicleGearsData& gearsData = CreatePxVehicleGearsData(gearbox);
+        const PxVehicleAutoBoxData& autoBoxData = CreatePxVehicleAutoBoxData();
+        const PxVehicleClutchData& clutchData = CreatePxVehicleClutchData(gearbox);
+        const PxVehicleAckermannGeometryData& geometryData = CreatePxVehicleAckermannGeometryData(wheelsSimData);
+
+        driveSimData.setDiffData(differentialData);
+        driveSimData.setEngineData(engineData);
+        driveSimData.setGearsData(gearsData);
+        driveSimData.setAutoBoxData(autoBoxData);
+        driveSimData.setClutchData(clutchData);
+        driveSimData.setAckermannGeometryData(geometryData);
+
+        // Create vehicle drive
+        auto driveTank = PxVehicleDriveTank::allocate(wheels.Count());
+        driveTank->setup(PhysX, actorPhysX, *wheelsSimData, driveSimData, wheels.Count());
+        driveTank->mDriveDynData.forceGearChange(PxVehicleGearsData::eFIRST);
+        driveTank->mDriveDynData.setUseAutoGears(gearbox.AutoGear);
+        vehicle = driveTank;
         break;
     }
     default:
@@ -3388,6 +3726,9 @@ void PhysicsBackend::DestroyVehicle(void* vehicle, int32 driveType)
     case WheeledVehicle::DriveTypes::NoDrive:
         ((PxVehicleNoDrive*)vehicle)->free();
         break;
+    case WheeledVehicle::DriveTypes::Tank:
+        ((PxVehicleDriveTank*)vehicle)->free();
+        break;
     }
 }
 
@@ -3398,43 +3739,40 @@ void PhysicsBackend::UpdateVehicleWheels(WheeledVehicle* actor)
     for (uint32 i = 0; i < wheelsSimData->getNbWheels(); i++)
     {
         auto& wheel = actor->_wheels[i];
-
-        // Update suspension data
-        PxVehicleSuspensionData suspensionData = wheelsSimData->getSuspensionData(i);
-        const float suspensionFrequency = 7.0f;
-        suspensionData.mMaxCompression = wheel.SuspensionMaxRaise;
-        suspensionData.mMaxDroop = wheel.SuspensionMaxDrop;
-        suspensionData.mSpringStrength = Math::Square(suspensionFrequency) * suspensionData.mSprungMass;
-        suspensionData.mSpringDamperRate = wheel.SuspensionDampingRate * 2.0f * Math::Sqrt(suspensionData.mSpringStrength * suspensionData.mSprungMass);
+        const PxVehicleSuspensionData& suspensionData = CreatePxVehicleSuspensionData(wheel, wheelsSimData->getSuspensionData(i).mSprungMass);
+        const PxVehicleTireData& tireData = CreatePxVehicleTireData(wheel);
+        const PxVehicleWheelData& wheelData = CreatePxVehicleWheelData(wheel);
         wheelsSimData->setSuspensionData(i, suspensionData);
-
-        // Update tire data
-        PxVehicleTireData tire;
-        int32 tireIndex = WheelTireTypes.Find(wheel.TireFrictionScale);
-        if (tireIndex == -1)
-        {
-            // New tire type
-            tireIndex = WheelTireTypes.Count();
-            WheelTireTypes.Add(wheel.TireFrictionScale);
-            WheelTireFrictionsDirty = true;
-        }
-        tire.mType = tireIndex;
-        tire.mLatStiffX = wheel.TireLateralMax;
-        tire.mLatStiffY = wheel.TireLateralStiffness;
-        tire.mLongitudinalStiffnessPerUnitGravity = wheel.TireLongitudinalStiffness;
-        wheelsSimData->setTireData(i, tire);
-
-        // Update wheel data
-        PxVehicleWheelData wheelData;
-        wheelData.mMass = wheel.Mass;
-        wheelData.mRadius = wheel.Radius;
-        wheelData.mWidth = wheel.Width;
-        wheelData.mMOI = 0.5f * wheelData.mMass * Math::Square(wheelData.mRadius);
-        wheelData.mDampingRate = M2ToCm2(wheel.DampingRate);
-        wheelData.mMaxSteer = wheel.MaxSteerAngle * DegreesToRadians;
-        wheelData.mMaxBrakeTorque = M2ToCm2(wheel.MaxBrakeTorque);
-        wheelData.mMaxHandBrakeTorque = M2ToCm2(wheel.MaxHandBrakeTorque);
+        wheelsSimData->setTireData(i, tireData);
         wheelsSimData->setWheelData(i, wheelData);
+    }
+}
+
+void PhysicsBackend::UpdateVehicleAntiRollBars(WheeledVehicle* actor)
+{
+    int wheelsCount = actor->_wheels.Count();
+    auto drive = (PxVehicleWheels*)actor->_vehicle;
+    PxVehicleWheelsSimData* wheelsSimData = &drive->mWheelsSimData;
+
+    // Update anti roll bars for wheels axles
+    const auto& antiRollBars = actor->GetAntiRollBars();
+    for (int32 i = 0; i < antiRollBars.Count(); i++)
+    {
+        const int32 axleIndex = antiRollBars.Get()[i].Axle;
+        const int32 leftWheelIndex = axleIndex * 2;
+        const int32 rightWheelIndex = leftWheelIndex + 1;
+        if (leftWheelIndex >= wheelsCount || rightWheelIndex >= wheelsCount)
+            continue;
+
+        const PxVehicleAntiRollBarData& antiRollBar = CreatePxPxVehicleAntiRollBarData(antiRollBars.Get()[i], leftWheelIndex, rightWheelIndex);
+        if ((int32)wheelsSimData->getNbAntiRollBarData() - 1 < i)
+        {
+            wheelsSimData->addAntiRollBarData(antiRollBar);
+        }
+        else
+        {
+            wheelsSimData->setAntiRollBarData(axleIndex, antiRollBar);
+        }
     }
 }
 
@@ -3447,28 +3785,24 @@ void PhysicsBackend::SetVehicleEngine(void* vehicle, const void* value)
     case PxVehicleTypes::eDRIVE4W:
     {
         auto drive4W = (PxVehicleDrive4W*)drive;
+        const PxVehicleEngineData& engineData = CreatePxVehicleEngineData(engine);
         PxVehicleDriveSimData4W& driveSimData = drive4W->mDriveSimData;
-        PxVehicleEngineData engineData;
-        engineData.mMOI = M2ToCm2(engine.MOI);
-        engineData.mPeakTorque = M2ToCm2(engine.MaxTorque);
-        engineData.mMaxOmega = RpmToRadPerS(engine.MaxRotationSpeed);
-        engineData.mDampingRateFullThrottle = M2ToCm2(0.15f);
-        engineData.mDampingRateZeroThrottleClutchEngaged = M2ToCm2(2.0f);
-        engineData.mDampingRateZeroThrottleClutchDisengaged = M2ToCm2(0.35f);
         driveSimData.setEngineData(engineData);
         break;
     }
     case PxVehicleTypes::eDRIVENW:
     {
         auto drive4W = (PxVehicleDriveNW*)drive;
+        const PxVehicleEngineData& engineData = CreatePxVehicleEngineData(engine);
         PxVehicleDriveSimDataNW& driveSimData = drive4W->mDriveSimData;
-        PxVehicleEngineData engineData;
-        engineData.mMOI = M2ToCm2(engine.MOI);
-        engineData.mPeakTorque = M2ToCm2(engine.MaxTorque);
-        engineData.mMaxOmega = RpmToRadPerS(engine.MaxRotationSpeed);
-        engineData.mDampingRateFullThrottle = M2ToCm2(0.15f);
-        engineData.mDampingRateZeroThrottleClutchEngaged = M2ToCm2(2.0f);
-        engineData.mDampingRateZeroThrottleClutchDisengaged = M2ToCm2(0.35f);
+        driveSimData.setEngineData(engineData);
+        break;
+    }
+    case PxVehicleTypes::eDRIVETANK:
+    {
+        auto driveTank = (PxVehicleDriveTank*)drive;
+        const PxVehicleEngineData& engineData = CreatePxVehicleEngineData(engine);
+        PxVehicleDriveSimData& driveSimData = driveTank->mDriveSimData;
         driveSimData.setEngineData(engineData);
         break;
     }
@@ -3484,16 +3818,9 @@ void PhysicsBackend::SetVehicleDifferential(void* vehicle, const void* value)
     case PxVehicleTypes::eDRIVE4W:
     {
         auto drive4W = (PxVehicleDrive4W*)drive;
+        const PxVehicleDifferential4WData& differentialData = CreatePxVehicleDifferential4WData(differential);
         PxVehicleDriveSimData4W& driveSimData = drive4W->mDriveSimData;
-        PxVehicleDifferential4WData differential4WData;
-        differential4WData.mType = (PxVehicleDifferential4WData::Enum)differential.Type;
-        differential4WData.mFrontRearSplit = differential.FrontRearSplit;
-        differential4WData.mFrontLeftRightSplit = differential.FrontLeftRightSplit;
-        differential4WData.mRearLeftRightSplit = differential.RearLeftRightSplit;
-        differential4WData.mCentreBias = differential.CentreBias;
-        differential4WData.mFrontBias = differential.FrontBias;
-        differential4WData.mRearBias = differential.RearBias;
-        driveSimData.setDiffData(differential4WData);
+        driveSimData.setDiffData(differentialData);
         break;
     }
     }
@@ -3510,41 +3837,37 @@ void PhysicsBackend::SetVehicleGearbox(void* vehicle, const void* value)
     case PxVehicleTypes::eDRIVE4W:
     {
         auto drive4W = (PxVehicleDrive4W*)drive;
+        const PxVehicleGearsData& gearData = CreatePxVehicleGearsData(gearbox);
+        const PxVehicleClutchData& clutchData = CreatePxVehicleClutchData(gearbox);
+        const PxVehicleAutoBoxData& autoBoxData = CreatePxVehicleAutoBoxData();
         PxVehicleDriveSimData4W& driveSimData = drive4W->mDriveSimData;
-
-        // Gears
-        PxVehicleGearsData gears;
-        gears.mSwitchTime = Math::Max(gearbox.SwitchTime, 0.0f);
-        driveSimData.setGearsData(gears);
-
-        // Auto Box
-        PxVehicleAutoBoxData autoBox;
-        driveSimData.setAutoBoxData(autoBox);
-
-        // Clutch
-        PxVehicleClutchData clutch;
-        clutch.mStrength = M2ToCm2(gearbox.ClutchStrength);
-        driveSimData.setClutchData(clutch);
+        driveSimData.setGearsData(gearData);
+        driveSimData.setAutoBoxData(autoBoxData);
+        driveSimData.setClutchData(clutchData);
         break;
     }
     case PxVehicleTypes::eDRIVENW:
     {
         auto drive4W = (PxVehicleDriveNW*)drive;
+        const PxVehicleGearsData& gearData = CreatePxVehicleGearsData(gearbox);
+        const PxVehicleClutchData& clutchData = CreatePxVehicleClutchData(gearbox);
+        const PxVehicleAutoBoxData& autoBoxData = CreatePxVehicleAutoBoxData();
         PxVehicleDriveSimDataNW& driveSimData = drive4W->mDriveSimData;
-
-        // Gears
-        PxVehicleGearsData gears;
-        gears.mSwitchTime = Math::Max(gearbox.SwitchTime, 0.0f);
-        driveSimData.setGearsData(gears);
-
-        // Auto Box
-        PxVehicleAutoBoxData autoBox;
-        driveSimData.setAutoBoxData(autoBox);
-
-        // Clutch
-        PxVehicleClutchData clutch;
-        clutch.mStrength = M2ToCm2(gearbox.ClutchStrength);
-        driveSimData.setClutchData(clutch);
+        driveSimData.setGearsData(gearData);
+        driveSimData.setAutoBoxData(autoBoxData);
+        driveSimData.setClutchData(clutchData);
+        break;
+    }
+    case PxVehicleTypes::eDRIVETANK:
+    {
+        auto driveTank = (PxVehicleDriveTank*)drive;
+        const PxVehicleGearsData& gearData = CreatePxVehicleGearsData(gearbox);
+        const PxVehicleClutchData& clutchData = CreatePxVehicleClutchData(gearbox);
+        const PxVehicleAutoBoxData& autoBoxData = CreatePxVehicleAutoBoxData();
+        PxVehicleDriveSimData& driveSimData = driveTank->mDriveSimData;
+        driveSimData.setGearsData(gearData);
+        driveSimData.setAutoBoxData(autoBoxData);
+        driveSimData.setClutchData(clutchData);
         break;
     }
     }
@@ -3990,6 +4313,7 @@ void* PhysicsBackend::CreateHeightField(byte* data, int32 dataSize)
 
 void PhysicsBackend::GetConvexMeshTriangles(void* contextMesh, Array<Float3, HeapAllocation>& vertexBuffer, Array<int, HeapAllocation>& indexBuffer)
 {
+    PROFILE_CPU();
     auto contextMeshPhysX = (PxConvexMesh*)contextMesh;
     uint32 numIndices = 0;
     uint32 numVertices = contextMeshPhysX->getNbVertices();
@@ -4029,6 +4353,7 @@ void PhysicsBackend::GetConvexMeshTriangles(void* contextMesh, Array<Float3, Hea
 
 void PhysicsBackend::GetTriangleMeshTriangles(void* triangleMesh, Array<Float3>& vertexBuffer, Array<int32, HeapAllocation>& indexBuffer)
 {
+    PROFILE_CPU();
     auto triangleMeshPhysX = (PxTriangleMesh*)triangleMesh;
     uint32 numVertices = triangleMeshPhysX->getNbVertices();
     uint32 numIndices = triangleMeshPhysX->getNbTriangles() * 3;
@@ -4081,10 +4406,17 @@ void PhysicsBackend::GetHeightFieldSize(void* heightField, int32& rows, int32& c
     columns = (int32)heightFieldPhysX->getNbColumns();
 }
 
-float PhysicsBackend::GetHeightFieldHeight(void* heightField, float x, float z)
+float PhysicsBackend::GetHeightFieldHeight(void* heightField, int32 x, int32 z)
 {
     auto heightFieldPhysX = (PxHeightField*)heightField;
-    return heightFieldPhysX->getHeight(x, z);
+    return heightFieldPhysX->getHeight((float)x, (float)z);
+}
+
+PhysicsBackend::HeightFieldSample PhysicsBackend::GetHeightFieldSample(void* heightField, int32 x, int32 z)
+{
+    auto heightFieldPhysX = (PxHeightField*)heightField;
+    auto sample = heightFieldPhysX->getSample(x, z);
+    return { sample.height, sample.materialIndex0, sample.materialIndex1 };
 }
 
 bool PhysicsBackend::ModifyHeightField(void* heightField, int32 startCol, int32 startRow, int32 cols, int32 rows, const HeightFieldSample* data)
@@ -4190,8 +4522,22 @@ void PhysicsBackend::DestroyController(void* controller)
     controllerPhysX->release();
 }
 
+void PhysicsBackend::DestroyMaterial(void* material)
+{
+    if (!PhysX)
+        return; // Skip when called by Content unload after Physics is disposed
+    ASSERT_LOW_LAYER(material);
+    auto materialPhysX = (PxMaterial*)material;
+    materialPhysX->userData = nullptr;
+    FlushLocker.Lock();
+    DeleteObjects.Add(materialPhysX);
+    FlushLocker.Unlock();
+}
+
 void PhysicsBackend::DestroyObject(void* object)
 {
+    if (!PhysX)
+        return; // Skip when called by Content unload after Physics is disposed
     ASSERT_LOW_LAYER(object);
     auto objectPhysX = (PxBase*)object;
     FlushLocker.Lock();

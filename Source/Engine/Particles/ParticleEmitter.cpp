@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "ParticleEmitter.h"
 #include "ParticleSystem.h"
@@ -219,7 +219,7 @@ Asset::LoadResult ParticleEmitter::load()
         ClearDependencies();
         for (const auto& node : Graph.Nodes)
         {
-            if (node.Type == GRAPH_NODE_MAKE_TYPE(14, 300))
+            if (node.Type == GRAPH_NODE_MAKE_TYPE(14, 300) && node.Assets.Count() > 0)
             {
                 const auto function = node.Assets[0].As<ParticleEmitterFunction>();
                 if (function)

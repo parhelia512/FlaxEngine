@@ -1,10 +1,11 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 namespace FlaxEngine.GUI
 {
     /// <summary>
     /// Changes alpha of all its children
     /// </summary>
+    [ActorToolbox("GUI")]
     public class AlphaPanel : ContainerControl
     {
         /// <summary>
@@ -45,6 +46,14 @@ namespace FlaxEngine.GUI
             base.Draw();
 
             Render2D.PopTint();
+        }
+
+        /// <inheritdoc />
+        public override bool ContainsPoint(ref Float2 location, bool precise = false)
+        {
+            if (precise) // Ignore as visual-only element
+                return false;
+            return base.ContainsPoint(ref location, precise);
         }
     }
 }

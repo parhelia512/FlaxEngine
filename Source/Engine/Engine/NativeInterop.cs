@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if USE_NETCORE
 
@@ -31,8 +31,6 @@ namespace FlaxEngine.Interop
 
         private static bool firstAssemblyLoaded = false;
 
-        private static Dictionary<string, Type> typeCache = new();
-
         private static IntPtr boolTruePtr = ManagedHandle.ToIntPtr(ManagedHandle.Alloc((int)1, GCHandleType.Pinned));
         private static IntPtr boolFalsePtr = ManagedHandle.ToIntPtr(ManagedHandle.Alloc((int)0, GCHandleType.Pinned));
 
@@ -40,20 +38,25 @@ namespace FlaxEngine.Interop
         private static ConcurrentDictionary<IntPtr, Delegate> cachedDelegates = new();
         private static Dictionary<Type, (TypeHolder typeHolder, ManagedHandle handle)> managedTypes = new(new TypeComparer());
         private static List<ManagedHandle> fieldHandleCache = new();
+        private static List<ManagedHandle> propertyHandleCache = new();
 #if FLAX_EDITOR
         private static List<ManagedHandle> methodHandlesCollectible = new();
         private static ConcurrentDictionary<IntPtr, Delegate> cachedDelegatesCollectible = new();
         private static Dictionary<Type, (TypeHolder typeHolder, ManagedHandle handle)> managedTypesCollectible = new(new TypeComparer());
         private static List<ManagedHandle> fieldHandleCacheCollectible = new();
+        private static List<ManagedHandle> propertyHandleCacheCollectible = new();
 #endif
         private static Dictionary<object, ManagedHandle> classAttributesCacheCollectible = new();
         private static Dictionary<Assembly, ManagedHandle> assemblyHandles = new();
-        private static Dictionary<Type, int> _typeSizeCache = new();
+        private static ConcurrentDictionary<Type, int> _typeSizeCache = new();
 
         private static Dictionary<string, IntPtr> loadedNativeLibraries = new();
         internal static Dictionary<string, string> libraryPaths = new();
         private static Dictionary<Assembly, string> assemblyOwnedNativeLibraries = new();
         internal static AssemblyLoadContext scriptingAssemblyLoadContext;
+
+        private delegate TInternal ToNativeDelegate<T, TInternal>(T value);
+        private delegate T ToManagedDelegate<T, TInternal>(TInternal value);
 
         [System.Diagnostics.DebuggerStepThrough]
         private static IntPtr NativeLibraryImportResolver(string libraryName, Assembly assembly, DllImportSearchPath? dllImportSearchPath)
@@ -120,6 +123,12 @@ namespace FlaxEngine.Interop
         }
 
 #if !USE_AOT
+        [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "__unmanagedPtr")]
+        extern static ref IntPtr GetUnmanagedPtrFieldReference(Object obj);
+
+        [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "__internalId")]
+        extern static ref Guid GetInternalIdFieldReference(Object obj);
+
         // Cache offsets to frequently accessed fields of FlaxEngine.Object
         private static int unmanagedPtrFieldOffset = IntPtr.Size + (Unsafe.Read<int>((typeof(FlaxEngine.Object).GetField("__unmanagedPtr", BindingFlags.Instance | BindingFlags.NonPublic).FieldHandle.Value + 4 + IntPtr.Size).ToPointer()) & 0xFFFFFF);
         private static int internalIdFieldOffset = IntPtr.Size + (Unsafe.Read<int>((typeof(FlaxEngine.Object).GetField("__internalId", BindingFlags.Instance | BindingFlags.NonPublic).FieldHandle.Value + 4 + IntPtr.Size).ToPointer()) & 0xFFFFFF);
@@ -128,28 +137,28 @@ namespace FlaxEngine.Interop
         internal static void ScriptingObjectSetInternalValues(ManagedHandle objectHandle, IntPtr unmanagedPtr, IntPtr idPtr)
         {
             object obj = objectHandle.Target;
-            if (obj is not Object)
+            if (obj is not Object scriptingObject)
                 return;
 
-            {
-                ref IntPtr fieldRef = ref FieldHelper.GetReferenceTypeFieldReference<IntPtr>(unmanagedPtrFieldOffset, ref obj);
-                fieldRef = unmanagedPtr;
-            }
-
+            GetUnmanagedPtrFieldReference(scriptingObject) = unmanagedPtr;
             if (idPtr != IntPtr.Zero)
-            {
-                ref Guid nativeId = ref Unsafe.AsRef<Guid>(idPtr.ToPointer());
-                ref Guid fieldRef = ref FieldHelper.GetReferenceTypeFieldReference<Guid>(internalIdFieldOffset, ref obj);
-                fieldRef = nativeId;
-            }
+                GetInternalIdFieldReference(scriptingObject) = Unsafe.AsRef<Guid>(idPtr.ToPointer());
         }
 
         [UnmanagedCallersOnly]
         internal static ManagedHandle ScriptingObjectCreate(ManagedHandle typeHandle, IntPtr unmanagedPtr, IntPtr idPtr)
         {
             TypeHolder typeHolder = Unsafe.As<TypeHolder>(typeHandle.Target);
-            object obj = typeHolder.CreateScriptingObject(unmanagedPtr, idPtr);
-            return ManagedHandle.Alloc(obj);
+            try
+            {
+                object obj = typeHolder.CreateScriptingObject(unmanagedPtr, idPtr);
+                return ManagedHandle.Alloc(obj);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
+            return new ManagedHandle();
         }
 #endif
 
@@ -249,7 +258,7 @@ namespace FlaxEngine.Interop
         /// <param name="src">The input array.</param>
         /// <param name="convertFunc">Converter callback.</param>
         /// <returns>The output array.</returns>
-        public static TDst[] ConvertArray<TSrc, TDst>(Span<TSrc> src, Func<TSrc, TDst> convertFunc)
+        public static TDst[] ConvertArray<TSrc, TDst>(this Span<TSrc> src, Func<TSrc, TDst> convertFunc)
         {
             TDst[] dst = new TDst[src.Length];
             for (int i = 0; i < src.Length; i++)
@@ -265,50 +274,12 @@ namespace FlaxEngine.Interop
         /// <param name="src">The input array.</param>
         /// <param name="convertFunc">Converter callback.</param>
         /// <returns>The output array.</returns>
-        public static TDst[] ConvertArray<TSrc, TDst>(TSrc[] src, Func<TSrc, TDst> convertFunc)
+        public static TDst[] ConvertArray<TSrc, TDst>(this TSrc[] src, Func<TSrc, TDst> convertFunc)
         {
             TDst[] dst = new TDst[src.Length];
             for (int i = 0; i < src.Length; i++)
                 dst[i] = convertFunc(src[i]);
             return dst;
-        }
-
-        private static Type FindType(string typeName)
-        {
-            if (typeCache.TryGetValue(typeName, out Type type))
-                return type;
-
-            type = Type.GetType(typeName, ResolveAssembly, null);
-            if (type == null)
-                type = ResolveSlow(typeName);
-
-            if (type == null)
-            {
-                string fullTypeName = typeName;
-                typeName = typeName.Substring(0, typeName.IndexOf(','));
-                type = Type.GetType(typeName, ResolveAssembly, null);
-                if (type == null)
-                    type = ResolveSlow(typeName);
-
-                typeName = fullTypeName;
-            }
-
-            typeCache.Add(typeName, type);
-
-            return type;
-
-            static Type ResolveSlow(string typeName)
-            {
-                foreach (var assembly in scriptingAssemblyLoadContext.Assemblies)
-                {
-                    var type = assembly.GetType(typeName);
-                    if (type != null)
-                        return type;
-                }
-                return null;
-            }
-
-            static Assembly ResolveAssembly(AssemblyName name) => ResolveScriptingAssemblyByName(name, allowPartial: false);
         }
 
         /// <summary>Find <paramref name="assemblyName"/> among the scripting assemblies.</summary>
@@ -372,18 +343,15 @@ namespace FlaxEngine.Interop
         /// </summary>
         internal static Type GetInternalType(Type type)
         {
-            string[] splits = type.AssemblyQualifiedName.Split(',');
-            string @namespace = string.Join('.', splits[0].Split('.').SkipLast(1));
-            string className = @namespace.Length > 0 ? splits[0].Substring(@namespace.Length + 1) : splits[0];
-            string parentClassName = "";
-            if (className.Contains('+'))
-            {
-                parentClassName = className.Substring(0, className.LastIndexOf('+') + 1);
-                className = className.Substring(parentClassName.Length);
-            }
-            string marshallerName = className + "Marshaller";
-            string internalAssemblyQualifiedName = $"{@namespace}.{parentClassName}{marshallerName}+{className}Internal,{String.Join(',', splits.Skip(1))}";
-            return FindType(internalAssemblyQualifiedName);
+            Type marshallerType = type.GetCustomAttribute<System.Runtime.InteropServices.Marshalling.NativeMarshallingAttribute>()?.NativeType;
+            if (marshallerType == null)
+                return null;
+
+            Type internalType = marshallerType.GetNestedType($"{type.Name}Internal");
+            if (internalType == null)
+                return null;
+
+            return internalType;
         }
 
         internal class ReferenceTypePlaceholder { }
@@ -484,6 +452,8 @@ namespace FlaxEngine.Interop
                     field.SetValue(fieldOwner, fieldValue);
             }
 #else
+            // TODO: Use Flax.Build to generate UnsafeAccessor methods for scripting object fields, fallback to reflection for other types
+
             /// <summary>
             /// Returns a reference to the value of the field.
             /// </summary>
@@ -523,6 +493,7 @@ namespace FlaxEngine.Interop
             internal delegate void MarshalFieldTypedDelegate(FieldInfo field, int fieldOffset, ref T fieldOwner, IntPtr nativeFieldPtr, out int fieldSize);
             internal delegate void* GetBasePointer(ref T fieldOwner);
 
+            internal static Delegate toManagedDelegate;
             internal static FieldInfo[] marshallableFields;
             internal static int[] marshallableFieldOffsets;
             internal static MarshalFieldTypedDelegate[] toManagedFieldMarshallers;
@@ -645,16 +616,32 @@ namespace FlaxEngine.Interop
                 MethodInfo toManagedMethod;
                 if (type.IsValueType)
                 {
-                    string methodName;
-                    if (type == typeof(IntPtr))
-                        methodName = nameof(MarshalHelperValueType<ValueTypePlaceholder>.ToManagedPointer);
-                    else if (type == typeof(ManagedHandle))
-                        methodName = nameof(MarshalHelperValueType<ValueTypePlaceholder>.ToManagedHandle);
-                    else if (marshallableFields != null)
-                        methodName = nameof(MarshalHelperValueType<ValueTypePlaceholder>.ToManagedWithMarshallableFields);
+                    // Non-POD structures use internal layout (eg. SpriteHandleManaged in C++ with SpriteHandleMarshaller.SpriteHandleInternal in C#) so convert C++ data into C# data
+                    var attr = type.GetCustomAttribute<System.Runtime.InteropServices.Marshalling.NativeMarshallingAttribute>();
+                    toManagedMethod = attr?.NativeType.GetMethod("ToManaged", BindingFlags.Static | BindingFlags.NonPublic);
+                    if (toManagedMethod != null)
+                    {
+                        // TODO: optimize via delegate call rather than method invoke
+                        var internalType = toManagedMethod.GetParameters()[0].ParameterType;
+                        var types = new Type[] { type, internalType };
+                        toManagedDelegate = toManagedMethod.CreateDelegate(typeof(ToManagedDelegate<,>).MakeGenericType(types));
+                        //toManagedDelegate = toManagedMethod.CreateDelegate();//.CreateDelegate(typeof(ToManagedDelegate<,>).MakeGenericType(type, toManagedMethod.GetParameters()[0].ParameterType));
+                        string methodName = nameof(MarshalInternalHelper<ValueTypePlaceholder, ValueTypePlaceholder>.ToManagedMarshaller);
+                        toManagedMethod = typeof(MarshalInternalHelper<,>).MakeGenericType(types).GetMethod(methodName, BindingFlags.Static | BindingFlags.NonPublic);
+                    }
                     else
-                        methodName = nameof(MarshalHelperValueType<ValueTypePlaceholder>.ToManaged);
-                    toManagedMethod = typeof(MarshalHelperValueType<>).MakeGenericType(type).GetMethod(methodName, BindingFlags.Static | BindingFlags.NonPublic);
+                    {
+                        string methodName;
+                        if (type == typeof(IntPtr))
+                            methodName = nameof(MarshalHelperValueType<ValueTypePlaceholder>.ToManagedPointer);
+                        else if (type == typeof(ManagedHandle))
+                            methodName = nameof(MarshalHelperValueType<ValueTypePlaceholder>.ToManagedHandle);
+                        else if (marshallableFields != null)
+                            methodName = nameof(MarshalHelperValueType<ValueTypePlaceholder>.ToManagedWithMarshallableFields);
+                        else
+                            methodName = nameof(MarshalHelperValueType<ValueTypePlaceholder>.ToManaged);
+                        toManagedMethod = typeof(MarshalHelperValueType<>).MakeGenericType(type).GetMethod(methodName, BindingFlags.Static | BindingFlags.NonPublic);
+                    }
                 }
                 else if (type.IsArray)
                 {
@@ -1098,6 +1085,17 @@ namespace FlaxEngine.Interop
             }
         }
 
+        internal static class MarshalInternalHelper<T, TInternal> where T : struct
+                                                                  where TInternal : struct
+        {
+            internal static void ToManagedMarshaller(ref T managedValue, IntPtr nativePtr, bool byRef)
+            {
+                ToManagedDelegate<T, TInternal> toManaged = Unsafe.As<ToManagedDelegate<T, TInternal>>(MarshalHelper<T>.toManagedDelegate);
+                TInternal intern = Unsafe.Read<TInternal>(nativePtr.ToPointer());
+                managedValue = toManaged(Unsafe.Read<TInternal>(nativePtr.ToPointer()));
+            }
+        }
+
         internal static class MarshalHelperValueType<T> where T : struct
         {
             internal static void ToNativeWrapper(object managedObject, IntPtr nativePtr)
@@ -1332,7 +1330,7 @@ namespace FlaxEngine.Interop
                 if (invokeDelegate == null && !method.DeclaringType.IsValueType)
                 {
                     // Thread-safe creation
-                    lock (typeCache)
+                    lock (method)
                     {
                         if (invokeDelegate == null)
                         {
@@ -1455,27 +1453,16 @@ namespace FlaxEngine.Interop
             internal object CreateScriptingObject(IntPtr unmanagedPtr, IntPtr idPtr)
             {
                 object obj = RuntimeHelpers.GetUninitializedObject(wrappedType);
-                if (obj is Object)
+                if (obj is Object scriptingObject)
                 {
-                    // TODO: use UnsafeAccessorAttribute on .NET 8 and use this path on all platforms (including non-Desktop, see MCore::ScriptingObject::CreateScriptingObject)
-                    {
-                        ref IntPtr fieldRef = ref FieldHelper.GetReferenceTypeFieldReference<IntPtr>(unmanagedPtrFieldOffset, ref obj);
-                        fieldRef = unmanagedPtr;
-                    }
-
+                    GetUnmanagedPtrFieldReference(scriptingObject) = unmanagedPtr;
                     if (idPtr != IntPtr.Zero)
-                    {
-                        ref Guid nativeId = ref Unsafe.AsRef<Guid>(idPtr.ToPointer());
-                        ref Guid fieldRef = ref FieldHelper.GetReferenceTypeFieldReference<Guid>(internalIdFieldOffset, ref obj);
-                        fieldRef = nativeId;
-                    }
+                        GetInternalIdFieldReference(scriptingObject) = Unsafe.AsRef<Guid>(idPtr.ToPointer());
                 }
-
                 if (ctor != null)
                     ctor.Invoke(obj, null);
                 else
-                    Debug.LogException(new Exception($"Missing empty constructor in type '{wrappedType}'."));
-
+                    throw new NativeInteropException($"Missing empty constructor in type '{wrappedType}'.");
                 return obj;
             }
 #endif
@@ -1548,8 +1535,6 @@ namespace FlaxEngine.Interop
             private static (IntPtr ptr, int size)[] pinnedAllocations = new (IntPtr ptr, int size)[256];
             private static uint pinnedAllocationsPointer = 0;
 
-            private delegate TInternal ToNativeDelegate<T, TInternal>(T value);
-
             private delegate IntPtr UnboxerDelegate(object value, object converter);
 
             private static ConcurrentDictionary<Type, (UnboxerDelegate deleg, object toNativeDeleg)> unboxers = new(1, 3);
@@ -1591,7 +1576,7 @@ namespace FlaxEngine.Interop
             private static IntPtr PinValue<T>(T value) where T : struct
             {
                 // Store the converted value in unmanaged memory so it will not be relocated by the garbage collector.
-                int size = GetTypeSize(typeof(T));
+                int size = TypeHelpers<T>.MarshalSize;
                 uint index = Interlocked.Increment(ref pinnedAllocationsPointer) % (uint)pinnedAllocations.Length;
                 ref (IntPtr ptr, int size) alloc = ref pinnedAllocations[index];
                 if (alloc.size < size)
@@ -1676,6 +1661,8 @@ namespace FlaxEngine.Interop
         /// </summary>
         internal static ManagedHandle GetTypeManagedHandle(Type type)
         {
+            if (type.IsInterface && type.IsGenericType)
+                type = type.GetGenericTypeDefinition(); // Generic type to use type definition handle
             if (managedTypes.TryGetValue(type, out (TypeHolder typeHolder, ManagedHandle handle) tuple))
                 return tuple.handle;
 #if FLAX_EDITOR
@@ -1722,25 +1709,37 @@ namespace FlaxEngine.Interop
             return tuple;
         }
 
-        internal static int GetTypeSize(Type type)
+        internal static class TypeHelpers<T>
         {
-            if (!_typeSizeCache.TryGetValue(type, out var size))
+            public static readonly int MarshalSize;
+
+            static TypeHelpers()
             {
+                Type type = typeof(T);
                 try
                 {
                     var marshalType = type;
                     if (type.IsEnum)
                         marshalType = type.GetEnumUnderlyingType();
-                    size = Marshal.SizeOf(marshalType);
+                    MarshalSize = Marshal.SizeOf(marshalType);
                 }
                 catch
                 {
                     // Workaround the issue where structure defined within generic type instance (eg. MyType<int>.MyStruct) fails to get size
                     // https://github.com/dotnet/runtime/issues/46426
-                    var obj = Activator.CreateInstance(type);
-                    size = Marshal.SizeOf(obj);
+                    var obj = RuntimeHelpers.GetUninitializedObject(type);
+                    MarshalSize = Marshal.SizeOf(obj);
                 }
-                _typeSizeCache.Add(type, size);
+            }
+        }
+
+        internal static int GetTypeSize(Type type)
+        {
+            if (!_typeSizeCache.TryGetValue(type, out int size))
+            {
+                var marshalSizeField = typeof(TypeHelpers<>).MakeGenericType(type).GetField(nameof(TypeHelpers<int>.MarshalSize), BindingFlags.Static | BindingFlags.Public);
+                size = (int)marshalSizeField.GetValue(null);
+                _typeSizeCache.AddOrUpdate(type, size, (t, v) => size);
             }
             return size;
         }

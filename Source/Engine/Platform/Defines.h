@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -186,8 +186,8 @@ API_ENUM() enum class ArchitectureType
 #ifndef PLATFORM_ARCH_ARM64
 #define PLATFORM_ARCH_ARM64 0
 #endif
-#ifndef PLATFORM_WCHAR_IS_CHAR16
-#define PLATFORM_WCHAR_IS_CHAR16 0
+#ifndef PLATFORM_TEXT_IS_CHAR16
+#define PLATFORM_TEXT_IS_CHAR16 0
 #endif
 #ifndef PLATFORM_DEBUG_BREAK
 #define PLATFORM_DEBUG_BREAK

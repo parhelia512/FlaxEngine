@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "SkinnedMesh.h"
 #include "MeshDeformation.h"
@@ -17,6 +17,69 @@
 #include "Engine/Scripting/ManagedCLR/MCore.h"
 #include "Engine/Threading/Task.h"
 #include "Engine/Threading/Threading.h"
+
+void SkeletonData::Swap(SkeletonData& other)
+{
+    Nodes.Swap(other.Nodes);
+    Bones.Swap(other.Bones);
+}
+
+Transform SkeletonData::GetNodeTransform(int32 nodeIndex) const
+{
+    const int32 parentIndex = Nodes[nodeIndex].ParentIndex;
+    if (parentIndex == -1)
+    {
+        return Nodes[nodeIndex].LocalTransform;
+    }
+    const Transform parentTransform = GetNodeTransform(parentIndex);
+    return parentTransform.LocalToWorld(Nodes[nodeIndex].LocalTransform);
+}
+
+void SkeletonData::SetNodeTransform(int32 nodeIndex, const Transform& value)
+{
+    const int32 parentIndex = Nodes[nodeIndex].ParentIndex;
+    if (parentIndex == -1)
+    {
+        Nodes[nodeIndex].LocalTransform = value;
+        return;
+    }
+    const Transform parentTransform = GetNodeTransform(parentIndex);
+    parentTransform.WorldToLocal(value, Nodes[nodeIndex].LocalTransform);
+}
+
+int32 SkeletonData::FindNode(const StringView& name) const
+{
+    for (int32 i = 0; i < Nodes.Count(); i++)
+    {
+        if (Nodes[i].Name == name)
+            return i;
+    }
+    return -1;
+}
+
+int32 SkeletonData::FindBone(int32 nodeIndex) const
+{
+    for (int32 i = 0; i < Bones.Count(); i++)
+    {
+        if (Bones[i].NodeIndex == nodeIndex)
+            return i;
+    }
+    return -1;
+}
+
+uint64 SkeletonData::GetMemoryUsage() const
+{
+    uint64 result = Nodes.Capacity() * sizeof(SkeletonNode) + Bones.Capacity() * sizeof(SkeletonBone);
+    for (const auto& e : Nodes)
+        result += (e.Name.Length() + 1) * sizeof(Char);
+    return result;
+}
+
+void SkeletonData::Dispose()
+{
+    Nodes.Resize(0);
+    Bones.Resize(0);
+}
 
 void SkinnedMesh::Init(SkinnedModel* model, int32 lodIndex, int32 index, int32 materialSlotIndex, const BoundingBox& box, const BoundingSphere& sphere)
 {
@@ -42,7 +105,7 @@ SkinnedMesh::~SkinnedMesh()
     SAFE_DELETE_GPU_RESOURCE(_indexBuffer);
 }
 
-bool SkinnedMesh::Load(uint32 vertices, uint32 triangles, void* vb0, void* ib, bool use16BitIndexBuffer)
+bool SkinnedMesh::Load(uint32 vertices, uint32 triangles, const void* vb0, const void* ib, bool use16BitIndexBuffer)
 {
     // Cache data
     uint32 indicesCount = triangles * 3;
@@ -96,7 +159,7 @@ void SkinnedMesh::Unload()
     _use16BitIndexBuffer = false;
 }
 
-bool SkinnedMesh::UpdateMesh(uint32 vertexCount, uint32 triangleCount, VB0SkinnedElementType* vb, void* ib, bool use16BitIndices)
+bool SkinnedMesh::UpdateMesh(uint32 vertexCount, uint32 triangleCount, const VB0SkinnedElementType* vb, const void* ib, bool use16BitIndices)
 {
     auto model = (SkinnedModel*)_model;
 
@@ -106,7 +169,7 @@ bool SkinnedMesh::UpdateMesh(uint32 vertexCount, uint32 triangleCount, VB0Skinne
     {
         // Calculate mesh bounds
         BoundingBox bounds;
-        BoundingBox::FromPoints((Float3*)vb, vertexCount, bounds);
+        BoundingBox::FromPoints((const Float3*)vb, vertexCount, bounds);
         SetBounds(bounds);
 
         // Send event (actors using this model can update bounds, etc.)
@@ -183,14 +246,12 @@ void SkinnedMesh::Draw(const RenderContext& renderContext, const DrawInfo& info,
     drawCall.Material = material;
     drawCall.World = *info.World;
     drawCall.ObjectPosition = drawCall.World.GetTranslation();
-    drawCall.ObjectRadius = info.Bounds.Radius; // TODO: should it be kept in sync with ObjectPosition?
+    drawCall.ObjectRadius = (float)info.Bounds.Radius; // TODO: should it be kept in sync with ObjectPosition?
     drawCall.Surface.GeometrySize = _box.GetSize();
     drawCall.Surface.PrevWorld = info.DrawState->PrevWorld;
-    drawCall.Surface.Lightmap = nullptr;
-    drawCall.Surface.LightmapUVsArea = Rectangle::Empty;
     drawCall.Surface.Skinning = info.Skinning;
     drawCall.Surface.LODDitherFactor = lodDitherFactor;
-    drawCall.WorldDeterminantSign = Math::FloatSelect(drawCall.World.RotDeterminant(), 1, -1);
+    drawCall.WorldDeterminantSign = RenderTools::GetWorldDeterminantSign(drawCall.World);
     drawCall.PerInstanceRandom = info.PerInstanceRandom;
 
     // Push draw call to the render list
@@ -226,14 +287,12 @@ void SkinnedMesh::Draw(const RenderContextBatch& renderContextBatch, const DrawI
     drawCall.Material = material;
     drawCall.World = *info.World;
     drawCall.ObjectPosition = drawCall.World.GetTranslation();
-    drawCall.ObjectRadius = info.Bounds.Radius; // TODO: should it be kept in sync with ObjectPosition?
+    drawCall.ObjectRadius = (float)info.Bounds.Radius; // TODO: should it be kept in sync with ObjectPosition?
     drawCall.Surface.GeometrySize = _box.GetSize();
     drawCall.Surface.PrevWorld = info.DrawState->PrevWorld;
-    drawCall.Surface.Lightmap = nullptr;
-    drawCall.Surface.LightmapUVsArea = Rectangle::Empty;
     drawCall.Surface.Skinning = info.Skinning;
     drawCall.Surface.LODDitherFactor = lodDitherFactor;
-    drawCall.WorldDeterminantSign = Math::FloatSelect(drawCall.World.RotDeterminant(), 1, -1);
+    drawCall.WorldDeterminantSign = RenderTools::GetWorldDeterminantSign(drawCall.World);
     drawCall.PerInstanceRandom = info.PerInstanceRandom;
 
     // Push draw call to the render lists
@@ -366,7 +425,7 @@ ScriptingObject* SkinnedMesh::GetParentModel()
 #if !COMPILE_WITHOUT_CSHARP
 
 template<typename IndexType>
-bool UpdateMesh(SkinnedMesh* mesh, MArray* verticesObj, MArray* trianglesObj, MArray* blendIndicesObj, MArray* blendWeightsObj, MArray* normalsObj, MArray* tangentsObj, MArray* uvObj)
+bool UpdateMesh(SkinnedMesh* mesh, const MArray* verticesObj, const MArray* trianglesObj, const MArray* blendIndicesObj, const MArray* blendWeightsObj, const MArray* normalsObj, const MArray* tangentsObj, const MArray* uvObj)
 {
     auto model = mesh->GetSkinnedModel();
     ASSERT(model && model->IsVirtual() && verticesObj && trianglesObj && blendIndicesObj && blendWeightsObj);
@@ -442,12 +501,12 @@ bool UpdateMesh(SkinnedMesh* mesh, MArray* verticesObj, MArray* trianglesObj, MA
     return mesh->UpdateMesh(vertexCount, triangleCount, vb.Get(), ib);
 }
 
-bool SkinnedMesh::UpdateMeshUInt(MArray* verticesObj, MArray* trianglesObj, MArray* blendIndicesObj, MArray* blendWeightsObj, MArray* normalsObj, MArray* tangentsObj, MArray* uvObj)
+bool SkinnedMesh::UpdateMeshUInt(const MArray* verticesObj, const MArray* trianglesObj, const MArray* blendIndicesObj, const MArray* blendWeightsObj, const MArray* normalsObj, const MArray* tangentsObj, const MArray* uvObj)
 {
     return ::UpdateMesh<uint32>(this, verticesObj, trianglesObj, blendIndicesObj, blendWeightsObj, normalsObj, tangentsObj, uvObj);
 }
 
-bool SkinnedMesh::UpdateMeshUShort(MArray* verticesObj, MArray* trianglesObj, MArray* blendIndicesObj, MArray* blendWeightsObj, MArray* normalsObj, MArray* tangentsObj, MArray* uvObj)
+bool SkinnedMesh::UpdateMeshUShort(const MArray* verticesObj, const MArray* trianglesObj, const MArray* blendIndicesObj, const MArray* blendWeightsObj, const MArray* normalsObj, const MArray* tangentsObj, const MArray* uvObj)
 {
     return ::UpdateMesh<uint16>(this, verticesObj, trianglesObj, blendIndicesObj, blendWeightsObj, normalsObj, tangentsObj, uvObj);
 }

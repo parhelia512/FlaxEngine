@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -18,7 +18,7 @@
 /// <summary>
 /// Text rendering object.
 /// </summary>
-API_CLASS(Attributes="ActorContextMenu(\"New/UI/Text Render\"), ActorToolbox(\"GUI\")")
+API_CLASS(Attributes="ActorContextMenu(\"New/UI/Text Render\"), ActorToolbox(\"Visuals\")")
 class FLAXENGINE_API TextRender : public Actor
 {
     DECLARE_SCENE_OBJECT(TextRender);
@@ -111,10 +111,10 @@ public:
     ShadowsCastingMode ShadowsMode = ShadowsCastingMode::All;
 
     /// <summary>
-    /// The object sort order key used when sorting drawable objects during rendering. Use lower values to draw object before others, higher values are rendered later (on top). Can be use to control transparency drawing.
+    /// The object sort order key used when sorting drawable objects during rendering. Use lower values to draw object before others, higher values are rendered later (on top). Can be used to control transparency drawing.
     /// </summary>
     API_FIELD(Attributes="EditorOrder(85), DefaultValue(0), EditorDisplay(\"Text\")")
-    int16 SortOrder = 0;
+    int8 SortOrder = 0;
 
     /// <summary>
     /// Gets the layout options. Layout is defined in local space of the object (on XY plane).

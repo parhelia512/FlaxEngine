@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -13,7 +13,6 @@
 /// </summary>
 API_CLASS(Attributes="ActorContextMenu(\"New/Physics/Cloth\"), ActorToolbox(\"Physics\")") class FLAXENGINE_API Cloth : public Actor
 {
-    friend class PhysicsBackend;
     DECLARE_SCENE_OBJECT(Cloth);
 
     /// <summary>
@@ -232,6 +231,11 @@ private:
 
 public:
     /// <summary>
+    /// Gets the native physics backend object.
+    /// </summary>
+    void* GetPhysicsCloth() const;
+
+    /// <summary>
     /// Gets the mesh to use for the cloth simulation (single mesh from specific LOD). Always from the parent static or animated model actor.
     /// </summary>
     API_PROPERTY(Attributes="EditorOrder(0), EditorDisplay(\"Cloth\")")
@@ -331,6 +335,11 @@ public:
 
     bool OnPreUpdate();
     void OnPostUpdate();
+
+private:
+#if USE_EDITOR
+    API_FIELD(Internal) bool DebugDrawDepthTest = true;
+#endif
 
 public:
     // [Actor]

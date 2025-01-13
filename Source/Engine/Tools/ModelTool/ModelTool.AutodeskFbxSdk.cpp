@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if COMPILE_WITH_MODEL_TOOL && USE_AUTODESK_FBX_SDK
 
@@ -383,6 +383,19 @@ bool ProcessMesh(ImporterData& data, FbxMesh* fbxMesh, MeshData& mesh, String& e
     for (int32 i = 0; i < indexCount; i++)
     {
         mesh.Indices[i] = fbxIndices[i];
+    }
+
+    if (data.Options.ReverseWindingOrder)
+    {
+        for (int32 i = 0; i < vertexCount; i += 3)
+        {
+            Swap(meshIndices[i + 1], meshIndices[i + 2]);
+            Swap(meshPositions[i + 1], meshPositions[i + 2]);
+            if (meshNormals)
+                Swap(meshNormals[i + 1], meshNormals[i + 2]);
+            if (meshTangents)
+                Swap(meshTangents[i + 1], meshTangents[i + 2]);
+        }
     }
 
     // Texture coordinates
@@ -816,7 +829,7 @@ void BakeTransforms(FbxScene* scene)
     scene->GetRootNode()->ConvertPivotAnimationRecursive(nullptr, FbxNode::eDestinationPivot, frameRate, false);
 }
 
-bool ModelTool::ImportDataAutodeskFbxSdk(const char* path, ImportedModelData& data, Options& options, String& errorMsg)
+bool ModelTool::ImportDataAutodeskFbxSdk(const String& path, ImportedModelData& data, Options& options, String& errorMsg)
 {
     ScopeLock lock(FbxSdkManager::Locker);
 
@@ -836,7 +849,7 @@ bool ModelTool::ImportDataAutodeskFbxSdk(const char* path, ImportedModelData& da
     auto ios = FbxSdkManager::Manager->GetIOSettings();
     ios->SetBoolProp(IMP_FBX_MODEL, importMeshes);
     ios->SetBoolProp(IMP_FBX_ANIMATION, importAnimations);
-    if (!importer->Initialize(path, -1, ios))
+    if (!importer->Initialize(StringAnsi(path), -1, ios))
     {
         errorMsg = String::Format(TEXT("Failed to initialize FBX importer. {0}"), String(importer->GetStatus().GetErrorString()));
         return false;

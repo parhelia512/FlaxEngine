@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 
@@ -16,6 +16,11 @@ namespace FlaxEngine.GUI
         private Control _showTarget;
         private string _currentText;
         private Window _window;
+
+        /// <summary>
+        /// The horizontal alignment of the text.
+        /// </summary>
+        public TextAlignment HorizontalTextAlignment = TextAlignment.Center;
 
         /// <summary>
         /// Gets or sets the time in seconds that mouse have to be over the target to show the tooltip.
@@ -234,13 +239,25 @@ namespace FlaxEngine.GUI
             Render2D.FillRectangle(new Rectangle(Float2.Zero, Size), Color.Lerp(style.BackgroundSelected, style.Background, 0.6f));
             Render2D.FillRectangle(new Rectangle(1.1f, 1.1f, Width - 2, Height - 2), style.Background);
 
+            // Padding for text
+            var textRect = GetClientArea();
+            float textX = HorizontalTextAlignment switch
+            {
+                TextAlignment.Near => 15,
+                TextAlignment.Center => 5,
+                TextAlignment.Far => -5,
+                _ => throw new ArgumentOutOfRangeException()
+            };
+            textRect.X += textX;
+            textRect.Width -= 10;
+
             // Tooltip text
             Render2D.DrawText(
                               style.FontMedium,
                               _currentText,
-                              GetClientArea(),
+                              textRect,
                               style.Foreground,
-                              TextAlignment.Center,
+                              HorizontalTextAlignment,
                               TextAlignment.Center,
                               TextWrapping.WrapWords
                              );
