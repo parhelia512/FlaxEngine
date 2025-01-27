@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -118,9 +118,19 @@ public:
     API_FIELD() bool IsCullingDisabled = false;
 
     /// <summary>
+    /// True if TAA has been resolved when rendering view and frame doesn't contain jitter anymore. Rendering geometry after this point should not use jitter anymore (eg. editor gizmos or custom geometry as overlay).
+    /// </summary>
+    API_FIELD() bool IsTaaResolved = false;
+
+    /// <summary>
     /// The static flags mask used to hide objects that don't have a given static flags. Eg. use StaticFlags::Lightmap to render only objects that can use lightmap.
     /// </summary>
     API_FIELD() StaticFlags StaticFlagsMask = StaticFlags::None;
+
+    /// <summary>
+    /// The static flags mask comparision rhs. Allows to draw objects that don't pass the static flags mask. Objects are checked with the following formula: (ObjectStaticFlags and StaticFlagsMask) == StaticFlagsMaskCompare.
+    /// </summary>
+    API_FIELD() StaticFlags StaticFlagsCompare = StaticFlags::None;
 
     /// <summary>
     /// The view flags.
@@ -151,16 +161,16 @@ public:
     /// The model LOD bias. Default is 0. Applied to all the objects in the shadow maps render views. Can be used to improve shadows rendering performance or increase quality.
     /// [Deprecated on 26.10.2022, expires on 26.10.2024]
     /// </summary>
-    API_FIELD() DEPRECATED int32 ShadowModelLODBias = 0;
+    API_FIELD() DEPRECATED() int32 ShadowModelLODBias = 0;
 
     /// <summary>
     /// The model LOD distance scale factor. Default is 1. Applied to all the objects in the shadow maps render views. Higher values increase LODs quality. Can be used to improve shadows rendering performance or increase quality.
     /// [Deprecated on 26.10.2022, expires on 26.10.2024]
     /// </summary>
-    API_FIELD() DEPRECATED float ShadowModelLODDistanceFactor = 1.0f;
+    API_FIELD() DEPRECATED() float ShadowModelLODDistanceFactor = 1.0f;
 
     /// <summary>
-    /// The Temporal Anti-Aliasing jitter frame index.
+    /// Temporal Anti-Aliasing jitter frame index.
     /// </summary>
     API_FIELD() int32 TaaFrameIndex = 0;
 
@@ -261,6 +271,11 @@ public:
     RenderView& operator=(const RenderView& other) = default;
     PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
+    /// <summary>
+    /// Updates the cached data for the view (inverse matrices, etc.).
+    /// </summary>
+    void UpdateCachedData();
+
     // Set up view with custom params
     // @param viewProjection View * Projection matrix
     void SetUp(const Matrix& viewProjection);
@@ -335,4 +350,24 @@ public:
 
     // Calculates the world matrix for the given transformation instance rendering.
     void GetWorldMatrix(const Transform& transform, Matrix& world) const;
+
+    // Applies the render origin to the transformation instance matrix.
+    FORCE_INLINE void GetWorldMatrix(Matrix& world) const
+    {
+        world.M41 -= (float)Origin.X;
+        world.M42 -= (float)Origin.Y;
+        world.M43 -= (float)Origin.Z;
+    }
+};
+
+// Removes TAA jitter from the RenderView when drawing geometry after TAA has been resolved to prevent unwanted jittering.
+struct TaaJitterRemoveContext
+{
+private:
+    RenderView* _view = nullptr;
+    Matrix _prevProjection, _prevNonJitteredProjection;
+
+public:
+    TaaJitterRemoveContext(const RenderView& view);
+    ~TaaJitterRemoveContext();
 };

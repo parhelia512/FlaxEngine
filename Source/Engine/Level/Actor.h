@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -164,13 +164,13 @@ public:
     /// [Deprecated in v1.5]
     /// </summary>
     API_PROPERTY(Attributes="HideInEditor, NoSerialize, NoAnimate")
-    DEPRECATED const String& GetTag() const;
+    DEPRECATED("Use HasTag instead") const String& GetTag() const;
 
     /// <summary>
     /// Sets the name of the tag.
     /// [Deprecated in v1.5]
     /// </summary>
-    API_PROPERTY() DEPRECATED void SetTag(const StringView& value);
+    API_PROPERTY() DEPRECATED("Use AddTag instead") void SetTag(const StringView& value);
 
     /// <summary>
     /// Gets the actor name.
@@ -185,7 +185,13 @@ public:
     /// Sets the actor name.
     /// </summary>
     /// <param name="value">The value to set.</param>
-    API_PROPERTY() void SetName(const StringView& value);
+    API_PROPERTY() void SetName(String&& value);
+
+    /// <summary>
+    /// Sets the actor name.
+    /// </summary>
+    /// <param name="value">The value to set.</param>
+    void SetName(const StringView& value);
 
 public:
     /// <summary>
@@ -383,6 +389,15 @@ public:
     }
 
     /// <summary>
+    /// Gets value indicating if actor is in a scene.
+    /// </summary>
+    API_PROPERTY(Attributes="HideInEditor, NoSerialize")
+    FORCE_INLINE bool HasScene() const
+    {
+        return _scene != nullptr;
+    }
+
+    /// <summary>
     /// Returns true if object is fully static on the scene, otherwise false.
     /// </summary>
     FORCE_INLINE bool IsStatic() const
@@ -534,9 +549,7 @@ public:
     /// <summary>
     /// Gets actor direction vector (forward vector).
     /// </summary>
-    /// <returns>The result value.</returns>
-    API_PROPERTY(Attributes="HideInEditor, NoSerialize")
-    FORCE_INLINE Float3 GetDirection() const
+    API_PROPERTY(Attributes="HideInEditor, NoSerialize") FORCE_INLINE Float3 GetDirection() const
     {
         return Float3::Transform(Float3::Forward, GetOrientation());
     }
@@ -571,7 +584,7 @@ public:
     /// <summary>
     /// Gets local position of the actor in parent actor space.
     /// </summary>
-    API_PROPERTY(Attributes="EditorDisplay(\"Transform\", \"Position\"), DefaultValue(typeof(Vector3), \"0,0,0\"), EditorOrder(-30), NoSerialize, CustomEditorAlias(\"FlaxEditor.CustomEditors.Editors.ActorTransformEditor+PositionEditor\")")
+    API_PROPERTY(Attributes="EditorDisplay(\"Transform\", \"Position\"), VisibleIf(\"ShowTransform\"), DefaultValue(typeof(Vector3), \"0,0,0\"), EditorOrder(-30), NoSerialize, CustomEditorAlias(\"FlaxEditor.CustomEditors.Editors.ActorTransformEditor+PositionEditor\")")
     FORCE_INLINE Vector3 GetLocalPosition() const
     {
         return _localTransform.Translation;
@@ -587,7 +600,7 @@ public:
     /// Gets local rotation of the actor in parent actor space.
     /// </summary>
     /// <code>Actor.LocalOrientation *= Quaternion.Euler(0, 10 * Time.DeltaTime, 0)</code>
-    API_PROPERTY(Attributes="EditorDisplay(\"Transform\", \"Rotation\"), DefaultValue(typeof(Quaternion), \"0,0,0,1\"), EditorOrder(-20), NoSerialize, CustomEditorAlias(\"FlaxEditor.CustomEditors.Editors.ActorTransformEditor+OrientationEditor\")")
+    API_PROPERTY(Attributes="EditorDisplay(\"Transform\", \"Rotation\"), VisibleIf(\"ShowTransform\"), DefaultValue(typeof(Quaternion), \"0,0,0,1\"), EditorOrder(-20), NoSerialize, CustomEditorAlias(\"FlaxEditor.CustomEditors.Editors.ActorTransformEditor+OrientationEditor\")")
     FORCE_INLINE Quaternion GetLocalOrientation() const
     {
         return _localTransform.Orientation;
@@ -602,7 +615,7 @@ public:
     /// <summary>
     /// Gets local scale vector of the actor in parent actor space.
     /// </summary>
-    API_PROPERTY(Attributes="EditorDisplay(\"Transform\", \"Scale\"), DefaultValue(typeof(Float3), \"1,1,1\"), Limit(float.MinValue, float.MaxValue, 0.01f), EditorOrder(-10), NoSerialize, CustomEditorAlias(\"FlaxEditor.CustomEditors.Editors.ActorTransformEditor+ScaleEditor\")")
+    API_PROPERTY(Attributes="EditorDisplay(\"Transform\", \"Scale\"), VisibleIf(\"ShowTransform\"), DefaultValue(typeof(Float3), \"1,1,1\"), Limit(float.MinValue, float.MaxValue, 0.01f), EditorOrder(-10), NoSerialize, CustomEditorAlias(\"FlaxEditor.CustomEditors.Editors.ActorTransformEditor+ScaleEditor\")")
     FORCE_INLINE Float3 GetLocalScale() const
     {
         return _localTransform.Scale;
@@ -640,10 +653,7 @@ public:
     /// Gets the matrix that transforms a point from the local space of the actor to world space.
     /// </summary>
     /// <param name="localToWorld">The world to local matrix.</param>
-    API_FUNCTION() FORCE_INLINE void GetLocalToWorldMatrix(API_PARAM(Out) Matrix& localToWorld) const
-    {
-        _transform.GetWorld(localToWorld);
-    }
+    API_FUNCTION() void GetLocalToWorldMatrix(API_PARAM(Out) Matrix& localToWorld) const;
 
 public:
     /// <summary>
@@ -739,6 +749,12 @@ public:
     /// </summary>
     API_PROPERTY() bool IsPrefabRoot() const;
 
+    /// <summary>
+    /// Gets the root of the prefab this actor is attached to.
+    /// </summary>
+    /// <returns>The root prefab object, or null if this actor is not a prefab.</returns>
+    API_FUNCTION() Actor* GetPrefabRoot();
+
 public:
     /// <summary>
     /// Tries to find the actor with the given name in this actor hierarchy (checks this actor and all children hierarchy).
@@ -751,8 +767,9 @@ public:
     /// Tries to find the actor of the given type in this actor hierarchy (checks this actor and all children hierarchy).
     /// </summary>
     /// <param name="type">Type of the actor to search for. Includes any actors derived from the type.</param>
+    /// <param name="activeOnly">Finds only a active actor.</param>
     /// <returns>Actor instance if found, null otherwise.</returns>
-    API_FUNCTION() Actor* FindActor(API_PARAM(Attributes="TypeReference(typeof(Actor))") const MClass* type) const;
+    API_FUNCTION() Actor* FindActor(API_PARAM(Attributes="TypeReference(typeof(Actor))") const MClass* type, bool activeOnly = false) const;
 
     /// <summary>
     /// Tries to find the actor of the given type and name in this actor hierarchy (checks this actor and all children hierarchy).
@@ -767,8 +784,9 @@ public:
     /// </summary>
     /// <param name="type">Type of the actor to search for. Includes any actors derived from the type.</param>
     /// <param name="tag">The tag of the actor to search for.</param>
+    /// <param name="activeOnly">Finds only an active actor.</param>
     /// <returns>Actor instance if found, null otherwise.</returns>
-    API_FUNCTION() Actor* FindActor(API_PARAM(Attributes="TypeReference(typeof(Actor))") const MClass* type, const Tag& tag) const;
+    API_FUNCTION() Actor* FindActor(API_PARAM(Attributes="TypeReference(typeof(Actor))") const MClass* type, const Tag& tag, bool activeOnly = false) const;
 
     /// <summary>
     /// Tries to find the actor of the given type in this actor hierarchy (checks this actor and all children hierarchy).
@@ -790,7 +808,7 @@ public:
     {
         return (T*)FindActor(T::GetStaticClass(), name);
     }
-    
+
     /// <summary>
     /// Tries to find the actor of the given type and tag in this actor hierarchy (checks this actor and all children hierarchy).
     /// </summary>
@@ -834,7 +852,7 @@ public:
     API_FUNCTION() bool HasActorInChildren(Actor* a) const;
 
     /// <summary>
-    /// Determines if there is an intersection between the current object and a Ray.
+    /// Determines if there is an intersection between the current object and a ray.
     /// </summary>
     /// <param name="ray">The ray to test.</param>
     /// <param name="distance">When the method completes, contains the distance of the intersection (if any valid).</param>
@@ -861,7 +879,7 @@ public:
     /// Rotates actor to orient it towards the specified world position with upwards direction.
     /// </summary>
     /// <param name="worldPos">The world position to orient towards.</param>
-    /// <param name="worldUp">The up direction that Constrains y axis orientation to a plane this vector lies on. This rule might be broken if forward and up direction are nearly parallel.</param>
+    /// <param name="worldUp">The up direction that constrains up axis orientation to a plane this vector lies on. This rule might be broken if forward and up direction are nearly parallel.</param>
     API_FUNCTION() void LookAt(const Vector3& worldPos, const Vector3& worldUp);
 
     /// <summary>
@@ -874,14 +892,12 @@ public:
     /// Gets rotation of the actor oriented towards the specified world position with upwards direction.
     /// </summary>
     /// <param name="worldPos">The world position to orient towards.</param>
-    /// <param name="worldUp">The up direction that Constrains y axis orientation to a plane this vector lies on. This rule might be broken if forward and up direction are nearly parallel.</param>
+    /// <param name="worldUp">The up direction that constrains up axis orientation to a plane this vector lies on. This rule might be broken if forward and up direction are nearly parallel.</param>
     API_FUNCTION() Quaternion LookingAt(const Vector3& worldPos, const Vector3& worldUp) const;
 
 public:
     /// <summary>
     /// Execute custom action on actors tree.
-    /// Action should returns false to stop calling deeper.
-    /// First action argument is current actor object.
     /// </summary>
     /// <param name="action">Actor to call on every actor in the tree. Returns true if keep calling deeper.</param>
     /// <param name="args">Custom arguments for the function</param>
@@ -891,14 +907,12 @@ public:
         if (action(this, args...))
         {
             for (int32 i = 0; i < Children.Count(); i++)
-                Children[i]->TreeExecute<Params...>(action, args...);
+                Children.Get()[i]->TreeExecute<Params...>(action, args...);
         }
     }
 
     /// <summary>
     /// Execute custom action on actor children tree.
-    /// Action should returns false to stop calling deeper.
-    /// First action argument is current actor object.
     /// </summary>
     /// <param name="action">Actor to call on every actor in the tree. Returns true if keep calling deeper.</param>
     /// <param name="args">Custom arguments for the function</param>
@@ -906,7 +920,7 @@ public:
     void TreeExecuteChildren(Function<bool(Actor*, Params ...)>& action, Params ... args)
     {
         for (int32 i = 0; i < Children.Count(); i++)
-            Children[i]->TreeExecute<Params...>(action, args...);
+            Children.Get()[i]->TreeExecute<Params...>(action, args...);
     }
 
 public:
@@ -982,34 +996,37 @@ public:
     /// <summary>
     /// Called when actor parent gets changed.
     /// </summary>
-    virtual void OnParentChanged();
+    API_FUNCTION() virtual void OnParentChanged();
 
     /// <summary>
     /// Called when actor transform gets changed.
     /// </summary>
-    virtual void OnTransformChanged();
+    API_FUNCTION() virtual void OnTransformChanged();
 
     /// <summary>
     /// Called when actor active state gets changed.
     /// </summary>
-    virtual void OnActiveChanged();
+    API_FUNCTION() virtual void OnActiveChanged();
 
     /// <summary>
     /// Called when actor active in tree state gets changed.
     /// </summary>
-    virtual void OnActiveInTreeChanged();
+    API_FUNCTION() virtual void OnActiveInTreeChanged();
 
     /// <summary>
     /// Called when order in parent children array gets changed.
     /// </summary>
-    virtual void OnOrderInParentChanged();
+    API_FUNCTION() virtual void OnOrderInParentChanged();
+
+    /// <summary>
+    /// Called when actor static flag gets changed.
+    /// </summary>
+    API_FUNCTION() virtual void OnStaticFlagsChanged();
 
     /// <summary>
     /// Called when layer gets changed.
     /// </summary>
-    virtual void OnLayerChanged()
-    {
-    }
+    API_FUNCTION() virtual void OnLayerChanged();
 
     /// <summary>
     /// Called when adding object to the game.

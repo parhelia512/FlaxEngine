@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -77,14 +77,10 @@ namespace Flax.Build
                 var architectureId = RuntimeInformation.ProcessArchitecture;
                 switch (architectureId)
                 {
-                case Architecture.X86:
-                    return TargetArchitecture.x86;
-                case Architecture.X64:
-                    return TargetArchitecture.x64;
-                case Architecture.Arm:
-                    return TargetArchitecture.ARM;
-                case Architecture.Arm64:
-                    return TargetArchitecture.ARM64;
+                case Architecture.X86: return TargetArchitecture.x86;
+                case Architecture.X64: return TargetArchitecture.x64;
+                case Architecture.Arm: return TargetArchitecture.ARM;
+                case Architecture.Arm64: return TargetArchitecture.ARM64;
                 default: throw new NotImplementedException(string.Format("Unsupported build platform {0}.", architectureId));
                 }
             }
@@ -193,6 +189,16 @@ namespace Flax.Build
         }
 
         /// <summary>
+        /// Determines whether this platform can compile or cross-compile for the specified architecture.
+        /// </summary>
+        /// <param name="targetArchitecture">The architecture.</param>
+        /// <returns><c>true</c> if this platform can build the specified architecture; otherwise, <c>false</c>.</returns>
+        public virtual bool CanBuildArchitecture(TargetArchitecture targetArchitecture)
+        {
+            return IsPlatformSupported(Target, targetArchitecture);
+        }
+
+        /// <summary>
         /// Gets the path to the output file for the linker.
         /// </summary>
         /// <param name="name">The original library name.</param>
@@ -215,7 +221,7 @@ namespace Flax.Build
         /// </summary>
         /// <param name="targetPlatform">The target platform.</param>
         /// <param name="nullIfMissing">True if return null platform if it's missing, otherwise will invoke an exception.</param>
-        /// <returns>The toolchain.</returns>
+        /// <returns>The platform.</returns>
         public static Platform GetPlatform(TargetPlatform targetPlatform, bool nullIfMissing = false)
         {
             if (_platforms == null)
@@ -290,14 +296,24 @@ namespace Flax.Build
             var subdir = "Binaries/Editor/";
             switch (Platform.BuildTargetPlatform)
             {
-                case TargetPlatform.Windows:
+            case TargetPlatform.Windows:
+            {
+                switch (Platform.BuildTargetArchitecture)
+                {
+                case TargetArchitecture.x64:
                     return subdir + "Win64";
-                case TargetPlatform.Linux:
-                    return subdir + "Linux";
-                case TargetPlatform.Mac:
-                    return subdir + "Mac";
+                case TargetArchitecture.x86:
+                    return subdir + "Win32";
+                case TargetArchitecture.ARM64:
+                    return subdir + "ARM64";
+                default:
+                    throw new NotImplementedException($"{Platform.BuildTargetPlatform}: {Platform.BuildTargetArchitecture}");
+                }
             }
-            throw new NotImplementedException();
+            case TargetPlatform.Linux: return subdir + "Linux";
+            case TargetPlatform.Mac: return subdir + "Mac";
+            }
+            throw new NotImplementedException(Platform.BuildTargetPlatform.ToString());
         }
 
         /// <summary>
@@ -313,7 +329,7 @@ namespace Flax.Build
 
             switch (targetPlatform)
             {
-            case TargetPlatform.Windows: return targetArchitecture == TargetArchitecture.x64 || targetArchitecture == TargetArchitecture.x86;
+            case TargetPlatform.Windows: return targetArchitecture == TargetArchitecture.x64 || targetArchitecture == TargetArchitecture.x86 || targetArchitecture == TargetArchitecture.ARM64;
             case TargetPlatform.XboxScarlett: return targetArchitecture == TargetArchitecture.x64;
             case TargetPlatform.XboxOne: return targetArchitecture == TargetArchitecture.x64;
             case TargetPlatform.UWP: return targetArchitecture == TargetArchitecture.x64;

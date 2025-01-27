@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Engine/Content/Content.h"
 #include "Engine/Content/AssetReference.h"
@@ -189,7 +189,7 @@ TEST_CASE("Prefabs")
         Guid newChildId;
         Guid::Parse(TEXT("123456a04cc60d56a2f024bfeef57723"), newChildId);
         auto newChild = EmptyActor::Spawn(ScriptingObject::SpawnParams(newChildId, EmptyActor::TypeInitializer));
-        newChild->SetName(TEXT("Prefab B.Child"));
+        newChild->SetName(String(TEXT("Prefab B.Child")));
         newChild->SetParent(instanceB);
 
         // Apply nested prefab changes
@@ -213,7 +213,7 @@ TEST_CASE("Prefabs")
         // Add another child 
         Guid::Parse(TEXT("678906a04cc60d56a2f024bfeef57723"), newChildId);
         newChild = EmptyActor::Spawn(ScriptingObject::SpawnParams(newChildId, EmptyActor::TypeInitializer));
-        newChild->SetName(TEXT("Prefab B.Child 2"));
+        newChild->SetName(String(TEXT("Prefab B.Child 2")));
         newChild->SetParent(instanceB);
 
         // Apply nested prefab changes

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if PLATFORM_WINDOWS
 
@@ -273,7 +273,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
-LONG CALLBACK SehExceptionHandler(EXCEPTION_POINTERS* ep)
+long __stdcall WindowsPlatform::SehExceptionHandler(EXCEPTION_POINTERS* ep)
 {
     if (ep->ExceptionRecord->ExceptionCode == CLR_EXCEPTION)
     {
@@ -1311,6 +1311,14 @@ Array<PlatformBase::StackFrame> WindowsPlatform::GetStackFrames(int32 skipCount,
         stack.AddrBStore.Offset = ctx.RsBSP;
         stack.AddrBStore.Mode = AddrModeFlat;
         stack.AddrStack.Offset = ctx.IntSp;
+        stack.AddrStack.Mode = AddrModeFlat;
+#elif _M_ARM64
+        imageType = IMAGE_FILE_MACHINE_ARM64;
+        stack.AddrPC.Offset = ctx.Pc;
+        stack.AddrPC.Mode = AddrModeFlat;
+        stack.AddrFrame.Offset = ctx.Fp;
+        stack.AddrFrame.Mode = AddrModeFlat;
+        stack.AddrStack.Offset = ctx.Sp;
         stack.AddrStack.Mode = AddrModeFlat;
 #else
 #error "Platform not supported!"

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -28,7 +28,12 @@ public:
     API_FIELD(ReadOnly) static bool HasFocus;
 
     /// <summary>
-    /// Gets the current frame count since the start of the game.
+    /// Gets the current update counter since the start of the game.
+    /// </summary>
+    API_FIELD(ReadOnly) static uint64 UpdateCount;
+
+    /// <summary>
+    /// Gets the current frame (drawing) count since the start of the game.
     /// </summary>
     API_FIELD(ReadOnly) static uint64 FrameCount;
 
@@ -73,6 +78,11 @@ public:
     /// Event called during game loop when application gets unpaused (engine tick will continue). Used on platforms that support only one app on screen.
     /// </summary>
     static Action Unpause;
+
+    /// <summary>
+    /// Event called when the engine is requesting exit.
+    /// </summary>
+    API_EVENT() static Action RequestingExit;
 
 public:
 

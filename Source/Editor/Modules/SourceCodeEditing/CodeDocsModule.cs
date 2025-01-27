@@ -1,10 +1,11 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
 using FlaxEditor.Scripting;
@@ -65,7 +66,7 @@ namespace FlaxEditor.Modules.SourceCodeEditing
                 {
                     var key = "T:" + GetXmlKey(type.Type.FullName);
                     if (xml.TryGetValue(key, out var xmlDoc))
-                        text += '\n' + xmlDoc;
+                        text += '\n' + FilterWhitespaces(xmlDoc);
                 }
             }
 
@@ -262,6 +263,27 @@ namespace FlaxEditor.Modules.SourceCodeEditing
             return Regex.Replace(typeFullNameString, @"\[.*\]", string.Empty).Replace('+', '.');
         }
 
+        private static string FilterWhitespaces(string str)
+        {
+            if (str.Contains("  ", StringComparison.Ordinal))
+            {
+                var sb = new StringBuilder();
+                var prev = str[0];
+                sb.Append(prev);
+                for (int i = 1; i < str.Length; i++)
+                {
+                    var c = str[i];
+                    if (prev != ' ' || c != ' ')
+                    {
+                        sb.Append(c);
+                    }
+                    prev = c;
+                }
+                str = sb.ToString();
+            }
+            return str;
+        }
+
         private Dictionary<string, string> GetXmlDocs(Assembly assembly)
         {
             if (!_xmlCache.TryGetValue(assembly, out var result))
@@ -271,7 +293,7 @@ namespace FlaxEditor.Modules.SourceCodeEditing
                 var assemblyPath = Utils.GetAssemblyLocation(assembly);
                 var assemblyName = assembly.GetName().Name;
                 var xmlFilePath = Path.ChangeExtension(assemblyPath, ".xml");
-                if (!File.Exists(assemblyPath))
+                if (!File.Exists(assemblyPath) && !string.IsNullOrEmpty(assemblyPath))
                 {
                     var uri = new UriBuilder(assemblyPath);
                     var path = Uri.UnescapeDataString(uri.Path);
@@ -294,7 +316,9 @@ namespace FlaxEditor.Modules.SourceCodeEditing
                                     var memberReader = xmlReader.ReadSubtree();
                                     if (memberReader.ReadToDescendant("summary"))
                                     {
-                                        result[rawName] = memberReader.ReadInnerXml().Replace('\n', ' ').Trim();
+                                        // Remove <see cref=""/> and replace them with the captured group (the content of the cref). Additionally, getting rid of prefixes
+                                        const string crefPattern = @"<see\s+cref=""(?:[A-Z]:FlaxEngine\.)?([^""]+)""\s*\/>";
+                                        result[rawName] = Regex.Replace(memberReader.ReadInnerXml(), crefPattern, "$1").Replace('\n', ' ').Trim();
                                     }
                                 }
                             }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "RigidBody.h"
 #include "Engine/Core/Log.h"
@@ -300,6 +300,44 @@ void RigidBody::ClosestPoint(const Vector3& position, Vector3& result) const
     }
 }
 
+void RigidBody::AddMovement(const Vector3& translation, const Quaternion& rotation)
+{
+    // filter rotation according to constraints
+    Quaternion allowedRotation;
+    if (EnumHasAllFlags(GetConstraints(), RigidbodyConstraints::LockRotation))
+        allowedRotation = Quaternion::Identity;
+    else
+    {
+        Float3 euler = rotation.GetEuler();
+        if (EnumHasAnyFlags(GetConstraints(), RigidbodyConstraints::LockRotationX))
+            euler.X = 0;
+        if (EnumHasAnyFlags(GetConstraints(), RigidbodyConstraints::LockRotationY))
+            euler.Y = 0;
+        if (EnumHasAnyFlags(GetConstraints(), RigidbodyConstraints::LockRotationZ))
+            euler.Z = 0;
+        allowedRotation = Quaternion::Euler(euler);
+    }
+
+    // filter translation according to the constraints
+    auto allowedTranslation = translation;
+    if (EnumHasAllFlags(GetConstraints(), RigidbodyConstraints::LockPosition))
+        allowedTranslation = Vector3::Zero;
+    else
+    {
+        if (EnumHasAnyFlags(GetConstraints(), RigidbodyConstraints::LockPositionX))
+            allowedTranslation.X = 0;
+        if (EnumHasAnyFlags(GetConstraints(), RigidbodyConstraints::LockPositionY))
+            allowedTranslation.Y = 0;
+        if (EnumHasAnyFlags(GetConstraints(), RigidbodyConstraints::LockPositionZ))
+            allowedTranslation.Z = 0;
+    }
+    Transform t;
+    t.Translation = _transform.Translation + allowedTranslation;
+    t.Orientation = _transform.Orientation * allowedRotation;
+    t.Scale = _transform.Scale;
+    SetTransform(t);
+}
+
 void RigidBody::OnCollisionEnter(const Collision& c)
 {
     CollisionEnter(c);
@@ -409,9 +447,13 @@ void RigidBody::OnActiveTransformChanged()
     // Change actor transform (but with locking)
     ASSERT(!_isUpdatingTransform);
     _isUpdatingTransform = true;
-    Transform transform;
+    Transform transform = _transform;
     PhysicsBackend::GetRigidActorPose(_actor, transform.Translation, transform.Orientation);
-    transform.Scale = _transform.Scale;
+    if (transform.Translation.IsNanOrInfinity() || transform.Orientation.IsNanOrInfinity())
+    {
+        LOG(Error, "GetRigidActorPose retuned NaN/Inf transformation");
+        transform = _transform;
+    }
     if (_parent)
     {
         _parent->GetTransform().WorldToLocal(transform, _localTransform);
@@ -531,7 +573,7 @@ void RigidBody::OnTransformChanged()
 
 void RigidBody::OnPhysicsSceneChanged(PhysicsScene* previous)
 {
-    PhysicsBackend::RemoveSceneActor(previous->GetPhysicsScene(), _actor);
+    PhysicsBackend::RemoveSceneActor(previous->GetPhysicsScene(), _actor, true);
     void* scene = GetPhysicsScene()->GetPhysicsScene();
     PhysicsBackend::AddSceneActor(scene, _actor);
     const bool putToSleep = !_startAwake && GetEnableSimulation() && !GetIsKinematic() && IsActiveInHierarchy();

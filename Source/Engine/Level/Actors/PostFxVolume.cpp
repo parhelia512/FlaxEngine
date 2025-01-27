@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "PostFxVolume.h"
 #include "Engine/Graphics/RenderTask.h"
@@ -33,7 +33,7 @@ void PostFxVolume::Collect(RenderContext& renderContext)
         }
     }
 
-    if (weight > ZeroTolerance)
+    if (weight > ZeroTolerance && renderContext.View.RenderLayersMask.HasLayer(GetLayer()))
     {
         const float totalSizeSqrt = (_transform.Scale * _size).LengthSquared();
         renderContext.List->AddSettingsBlend((IPostFxSettingsProvider*)this, weight, _priority, totalSizeSqrt);

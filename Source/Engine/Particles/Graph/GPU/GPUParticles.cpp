@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if COMPILE_WITH_GPU_PARTICLES
 
@@ -13,7 +13,7 @@
 #include "Engine/Graphics/Shaders/GPUShader.h"
 #include "Engine/Graphics/Shaders/GPUConstantBuffer.h"
 
-PACK_STRUCT(struct GPUParticlesData {
+GPU_CB_STRUCT(GPUParticlesData {
     Matrix ViewProjectionMatrix;
     Matrix InvViewProjectionMatrix;
     Matrix InvViewMatrix;
@@ -66,12 +66,14 @@ bool GPUParticles::Init(ParticleEmitter* owner, MemoryReadStream& shaderCacheStr
         LOG(Warning, "Missing valid GPU particles constant buffer.");
         return true;
     }
-    if (cb0->GetSize() < sizeof(GPUParticlesData))
+    const int32 cbSize = cb0->GetSize();
+    if (cbSize < sizeof(GPUParticlesData))
     {
-        LOG(Warning, "Invalid size GPU particles constant buffer. required {0} bytes but got {1}", sizeof(GPUParticlesData), cb0->GetSize());
+        LOG(Warning, "Invalid size GPU particles constant buffer. required {0} bytes but got {1}", sizeof(GPUParticlesData), cbSize);
         return true;
     }
-    _cbData.Resize(cb0->GetSize());
+    _cbData.Resize(cbSize);
+    Platform::MemoryClear(_cbData.Get(), cbSize);
 
     // Load material parameters
     if (_params.Load(materialParamsStream))
@@ -233,11 +235,9 @@ void GPUParticles::Execute(GPUContext* context, ParticleEmitter* emitter, Partic
         else
         {
             Matrix worldMatrix;
-            const Transform transform = effect->GetTransform();
+            effect->GetLocalToWorldMatrix(worldMatrix);
             if (viewTask)
-                viewTask->View.GetWorldMatrix(transform, worldMatrix);
-            else
-                transform.GetWorld(worldMatrix);
+                viewTask->View.GetWorldMatrix(worldMatrix);
             Matrix::Transpose(worldMatrix, cbData->WorldMatrix);
             worldMatrix.Invert();
             Matrix::Transpose(worldMatrix, cbData->InvWorldMatrix);

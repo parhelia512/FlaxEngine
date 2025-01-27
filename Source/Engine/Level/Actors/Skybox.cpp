@@ -1,12 +1,13 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Skybox.h"
 #include "Engine/Core/Math/Color.h"
 #include "Engine/Core/Types/Variant.h"
-#include "Engine/Graphics/RenderView.h"
 #include "Engine/Renderer/RenderList.h"
 #include "Engine/Serialization/Serialization.h"
+#include "Engine/Graphics/RenderView.h"
 #include "Engine/Graphics/RenderTask.h"
+#include "Engine/Graphics/RenderTools.h"
 #include "Engine/Level/Scene/SceneRendering.h"
 #include "Engine/Content/Assets/Material.h"
 #include "Engine/Content/Content.h"
@@ -93,18 +94,24 @@ bool Skybox::IsDynamicSky() const
     return !IsStatic();
 }
 
+float Skybox::GetIndirectLightingIntensity() const
+{
+    return 1.0f;
+}
+
 void Skybox::ApplySky(GPUContext* context, RenderContext& renderContext, const Matrix& world)
 {
     // Prepare mock draw call data
     DrawCall drawCall;
     drawCall.World = world;
     drawCall.ObjectPosition = drawCall.World.GetTranslation();
-    drawCall.ObjectRadius = _sphere.Radius;
+    drawCall.ObjectRadius = (float)_sphere.Radius;
     drawCall.Surface.GeometrySize = _box.GetSize();
-    drawCall.WorldDeterminantSign = Math::FloatSelect(world.RotDeterminant(), 1, -1);
+    drawCall.WorldDeterminantSign = RenderTools::GetWorldDeterminantSign(drawCall.World);
     drawCall.PerInstanceRandom = GetPerInstanceRandom();
     MaterialBase::BindParameters bindParams(context, renderContext, drawCall);
     bindParams.BindViewData();
+    bindParams.BindDrawData();
 
     // Check if use custom material
     if (CustomMaterial)

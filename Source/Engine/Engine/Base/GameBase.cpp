@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "../Game.h"
 
@@ -199,6 +199,7 @@ void GameBaseImpl::OnMainWindowClosed()
 
     // Request engine exit
     Globals::IsRequestingExit = true;
+    Engine::RequestingExit();
 }
 
 void GameBaseImpl::OnPostRender(GPUContext* context, RenderContext& renderContext)

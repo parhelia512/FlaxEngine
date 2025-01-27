@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Transform.h"
 #include "Matrix.h"
@@ -16,6 +16,16 @@ Transform::Transform(const Vector3& position, const Matrix3x3& rotationScale)
 String Transform::ToString() const
 {
     return String::Format(TEXT("{}"), *this);
+}
+
+bool Transform::IsIdentity() const
+{
+    return Translation.IsZero() && Orientation.IsIdentity() && Scale.IsOne();
+}
+
+bool Transform::IsNanOrInfinity() const
+{
+    return Translation.IsNanOrInfinity() || Orientation.IsNanOrInfinity() || Scale.IsNanOrInfinity();
 }
 
 Matrix Transform::GetRotation() const
@@ -188,6 +198,15 @@ void Transform::WorldToLocalVector(const Vector3& vector, Vector3& result) const
     result *= invScale;
 }
 
+void Transform::WorldToLocal(const Quaternion& rotation, Quaternion& result) const
+{
+    Quaternion orientation = Orientation;
+    orientation.Conjugate();
+    Quaternion::Multiply(orientation, rotation, orientation);
+    orientation.Normalize();
+    result = orientation;
+}
+
 Float3 Transform::GetRight() const
 {
     return Float3::Transform(Float3::Right, Orientation);
@@ -232,4 +251,10 @@ void Transform::Lerp(const Transform& t1, const Transform& t2, float amount, Tra
     Vector3::Lerp(t1.Translation, t2.Translation, amount, result.Translation);
     Quaternion::Slerp(t1.Orientation, t2.Orientation, amount, result.Orientation);
     Float3::Lerp(t1.Scale, t2.Scale, amount, result.Scale);
+}
+
+Transform Transform::AlignRotationToNormalAndSnapToGrid(const Vector3& point, const Vector3& normal, const Vector3& normalOffset, const Transform& relativeTo, const Vector3& gridSize, const Float3& scale)
+{
+    Quaternion rot = Quaternion::GetRotationFromNormal(normal, relativeTo);
+    return Transform(Vector3::SnapToGrid(point, gridSize, rot, relativeTo.Translation, normalOffset), rot, scale);
 }

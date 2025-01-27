@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -252,7 +252,7 @@ API_ENUM() enum class PartitionMode
     Logarithmic = 1,
 
     /// <summary>
-    /// PSSM cascade splits.
+    /// Parallel-Split Shadow Maps cascade splits.
     /// </summary>
     PSSM = 2,
 };

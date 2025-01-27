@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 // -----------------------------------------------------------------------------
 // Original code from SharpDX project. https://github.com/sharpdx/SharpDX/
@@ -184,7 +184,7 @@ namespace FlaxEngine
         /// <summary>
         /// Gets a value indicting whether this instance is normalized.
         /// </summary>
-        public bool IsNormalized => Mathf.IsOne(X * X + Y * Y);
+        public bool IsNormalized => Mathf.Abs((X * X + Y * Y) - 1.0f) < 1e-4f;
 
         /// <summary>
         /// Gets a value indicting whether this vector is zero
@@ -866,6 +866,16 @@ namespace FlaxEngine
         }
 
         /// <summary>
+        /// Returns the vector with components containing the smallest integer smaller to or equal to the original value.
+        /// </summary>
+        /// <param name="v">The value.</param>
+        /// <returns>The result.</returns>
+        public static Float2 Floor(Float2 v)
+        {
+            return new Float2(Mathf.Floor(v.X), Mathf.Floor(v.Y));
+        }
+
+        /// <summary>
         /// Breaks the components of the vector into an integral and a fractional part. Returns vector made of fractional parts.
         /// </summary>
         /// <param name="v">The value.</param>
@@ -1271,6 +1281,19 @@ namespace FlaxEngine
         {
             TransformNormal(ref normal, ref transform, out Float2 result);
             return result;
+        }
+
+        /// <summary>
+        /// Snaps the input position into the grid.
+        /// </summary>
+        /// <param name="pos">The position to snap.</param>
+        /// <param name="gridSize">The size of the grid.</param>
+        /// <returns>The position snapped to the grid.</returns>
+        public static Float2 SnapToGrid(Float2 pos, Float2 gridSize)
+        {
+            pos.X = Mathf.Ceil((pos.X - (gridSize.X * 0.5f)) / gridSize.X) * gridSize.X;
+            pos.Y = Mathf.Ceil((pos.Y - (gridSize.Y * 0.5f)) / gridSize.Y) * gridSize.Y;
+            return pos;
         }
 
         /// <summary>

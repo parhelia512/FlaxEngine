@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEditor.GUI.ContextMenu;
@@ -336,13 +336,14 @@ namespace FlaxEditor.Viewport.Previews
                     if (_showNodes)
                     {
                         // Draw bounding box at the node locations
-                        var localBox = new OrientedBoundingBox(new Vector3(-1.0f), new Vector3(1.0f));
+                        var boxSize = Mathf.Min(1.0f, _previewModel.Sphere.Radius / 100.0f);
+                        var localBox = new OrientedBoundingBox(new Vector3(-boxSize), new Vector3(boxSize));
                         for (int nodeIndex = 0; nodeIndex < pose.Length; nodeIndex++)
                         {
                             if (nodesMask != null && !nodesMask[nodeIndex])
                                 continue;
                             var transform = pose[nodeIndex];
-                            transform.Decompose(out var scale, out Matrix _, out _);
+                            transform.Decompose(out var scale, out Matrix3x3 _, out _);
                             transform = Matrix.Invert(Matrix.Scaling(scale)) * transform;
                             var box = localBox * transform;
                             DebugDraw.DrawWireBox(box, Color.Green, 0, false);

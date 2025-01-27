@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 
@@ -8,6 +8,7 @@ namespace FlaxEngine.GUI
     /// The basic GUI image control. Shows texture, sprite or render target.
     /// </summary>
     /// <seealso cref="FlaxEngine.GUI.ContainerControl" />
+    [ActorToolbox("GUI")]
     public class Image : ContainerControl
     {
         /// <summary>
@@ -133,6 +134,15 @@ namespace FlaxEngine.GUI
             }
 
             return false;
+        }
+
+        /// <inheritdoc />
+        public override void OnSubmit()
+        {
+            base.OnSubmit();
+
+            // Execute default user interaction via mouse click
+            Clicked?.Invoke(this, MouseButton.Left);
         }
     }
 }

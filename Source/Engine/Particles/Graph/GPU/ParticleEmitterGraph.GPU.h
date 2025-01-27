@@ -1,11 +1,11 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
 /// <summary>
 /// Current GPU particles emitter shader version.
 /// </summary>
-#define PARTICLE_GPU_GRAPH_VERSION 10
+#define PARTICLE_GPU_GRAPH_VERSION 11
 
 #if COMPILE_WITH_PARTICLE_GPU_GRAPH
 
@@ -26,7 +26,7 @@ public:
     /// <summary>
     /// The asset references. Linked resources such as Animation assets are referenced in graph data as ID. We need to keep valid refs to them at runtime to keep data in memory.
     /// </summary>
-    AssetReference<Asset> Assets[14];
+    Array<AssetReference<Asset>> Assets;
 };
 
 /// <summary>

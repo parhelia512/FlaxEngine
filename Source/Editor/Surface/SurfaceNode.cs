@@ -1,7 +1,8 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
+using System.Text;
 using FlaxEditor.Scripting;
 using FlaxEditor.Surface.Elements;
 using FlaxEditor.Surface.Undo;
@@ -124,7 +125,7 @@ namespace FlaxEditor.Surface
             Archetype = nodeArch;
             GroupArchetype = groupArch;
             AutoFocus = false;
-            TooltipText = nodeArch.Description;
+            TooltipText = GetTooltip();
             CullChildren = false;
             BackgroundColor = Style.Current.BackgroundNormal;
 
@@ -166,6 +167,15 @@ namespace FlaxEditor.Surface
             if (Surface == null)
                 return;
 
+            // Snap bounds (with ceil) when using grid snapping
+            if (Surface.GridSnappingEnabled)
+            {
+                var size = Surface.SnapToGrid(new Float2(width, height), true);
+                width = size.X;
+                height = size.Y;
+            }
+
+            // Arrange output boxes on the right edge
             for (int i = 0; i < Elements.Count; i++)
             {
                 if (Elements[i] is OutputBox box)
@@ -174,6 +184,7 @@ namespace FlaxEditor.Surface
                 }
             }
 
+            // Resize
             Size = CalculateNodeSize(width, height);
         }
 
@@ -851,6 +862,15 @@ namespace FlaxEditor.Surface
             }
         }
 
+        private string GetTooltip()
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.Append(string.IsNullOrEmpty(Archetype.Signature) ? Archetype.Title : Archetype.Signature);
+            if (!string.IsNullOrEmpty(Archetype.Description))
+                sb.Append("\n" + Archetype.Description);
+            return sb.ToString();
+        }
+
         /// <inheritdoc />
         protected override bool ShowTooltip => base.ShowTooltip && _headerRect.Contains(ref _mousePosition) && !Surface.IsLeftMouseButtonDown && !Surface.IsRightMouseButtonDown && !Surface.IsPrimaryMenuOpened;
 
@@ -951,20 +971,27 @@ namespace FlaxEditor.Surface
         {
             if (_isDuringValuesEditing || !Surface.CanEdit)
                 return;
-
-            if (values == null || Values == null || values.Length != Values.Length)
+            if (values == null || Values == null)
+                throw new ArgumentException();
+            bool resize = values.Length != Values.Length;
+            if (resize && (Archetype.Flags & NodeFlags.VariableValuesSize) == 0)
                 throw new ArgumentException();
 
             _isDuringValuesEditing = true;
 
             var before = Surface.Undo != null ? (object[])Values.Clone() : null;
 
-            Array.Copy(values, Values, values.Length);
+            if (resize)
+                Values = (object[])values.Clone();
+            else
+                Array.Copy(values, Values, values.Length);
             OnValuesChanged();
-            Surface.MarkAsEdited(graphEdited);
 
             if (Surface != null)
+            {
+                Surface.MarkAsEdited(graphEdited);
                 Surface.AddBatchedUndoAction(new EditNodeValuesAction(this, before, graphEdited));
+            }
 
             _isDuringValuesEditing = false;
         }
@@ -1058,19 +1085,30 @@ namespace FlaxEditor.Surface
         }
 
         /// <inheritdoc />
+        public override bool OnMouseDown(Float2 location, MouseButton button)
+        {
+            if (base.OnMouseDown(location, button))
+                return true;
+
+            if (button == MouseButton.Left && (Archetype.Flags & NodeFlags.NoCloseButton) == 0 && _closeButtonRect.Contains(ref location))
+                return true;
+            if (button == MouseButton.Right)
+                return true;
+
+            return false;
+        }
+
+        /// <inheritdoc />
         public override bool OnMouseUp(Float2 location, MouseButton button)
         {
             if (base.OnMouseUp(location, button))
                 return true;
 
             // Close
-            if (button == MouseButton.Left && (Archetype.Flags & NodeFlags.NoCloseButton) == 0)
+            if (button == MouseButton.Left && (Archetype.Flags & NodeFlags.NoCloseButton) == 0 && _closeButtonRect.Contains(ref location))
             {
-                if (_closeButtonRect.Contains(ref location))
-                {
-                    Surface.Delete(this);
-                    return true;
-                }
+                Surface.Delete(this);
+                return true;
             }
 
             // Secondary Context Menu

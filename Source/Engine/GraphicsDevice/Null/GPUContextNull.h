@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -48,7 +48,7 @@ public:
     {
     }
 
-    void ClearDepth(GPUTextureView* depthBuffer, float depthValue) override
+    void ClearDepth(GPUTextureView* depthBuffer, float depthValue, uint8 stencilValue) override
     {
     }
 

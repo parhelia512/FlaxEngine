@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -14,12 +14,13 @@
 #define FORCE_INLINE inline
 #define FORCE_NOINLINE __attribute__((noinline))
 #define NO_RETURN __attribute__((noreturn))
+#define NO_SANITIZE_ADDRESS __attribute__((no_sanitize_address))
+#define NO_SANITIZE_THREAD __attribute__((no_sanitize_thread))
 #define PACK_BEGIN()
 #define PACK_END() __attribute__((__packed__))
 #define ALIGN_BEGIN(_align)
 #define ALIGN_END(_align) __attribute__( (aligned(_align) ) )
 #define OFFSET_OF(X, Y) __builtin_offsetof(X, Y)
-#define DEPRECATED [[deprecated]]
 #define PRAGMA_DISABLE_DEPRECATION_WARNINGS \
     _Pragma("clang diagnostic push") \
     _Pragma("clang diagnostic ignored \"-Wdeprecated-declarations\"")
@@ -44,12 +45,13 @@
 #define FORCE_INLINE inline
 #define FORCE_NOINLINE __attribute__((noinline))
 #define NO_RETURN __attribute__((noreturn))
+#define NO_SANITIZE_ADDRESS __attribute__((no_sanitize_address))
+#define NO_SANITIZE_THREAD __attribute__((no_sanitize_thread))
 #define PACK_BEGIN()
 #define PACK_END() __attribute__((__packed__))
 #define ALIGN_BEGIN(_align)
 #define ALIGN_END(_align) __attribute__( (aligned(_align) ) )
 #define OFFSET_OF(X, Y) __builtin_offsetof(X, Y)
-#define DEPRECATED [[deprecated]]
 #define PRAGMA_DISABLE_DEPRECATION_WARNINGS
 #define PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
@@ -69,12 +71,13 @@
 #define FORCE_INLINE __forceinline
 #define FORCE_NOINLINE __declspec(noinline)
 #define NO_RETURN __declspec(noreturn)
+#define NO_SANITIZE_ADDRESS
+#define NO_SANITIZE_THREAD
 #define PACK_BEGIN() __pragma(pack(push, 1))
 #define PACK_END() ; __pragma(pack(pop))
 #define ALIGN_BEGIN(_align) __declspec(align(_align))
 #define ALIGN_END(_align)
 #define OFFSET_OF(X, Y) offsetof(X, Y)
-#define DEPRECATED __declspec(deprecated)
 #undef __PRETTY_FUNCTION__
 #define __PRETTY_FUNCTION__ __FUNCSIG__
 #define PRAGMA_DISABLE_DEPRECATION_WARNINGS \
@@ -92,7 +95,12 @@
 
 #endif
 
-#define PACK_STRUCT(__Declaration__) PACK_BEGIN() __Declaration__ PACK_END()
+#define PACK_STRUCT(_declaration) PACK_BEGIN() _declaration PACK_END()
+
+#define _DEPRECATED_0() [[deprecated]]
+#define _DEPRECATED_1(msg) [[deprecated(msg)]]
+#define _DEPRECATED(_0, _1, LASTARG, ...) LASTARG
+#define DEPRECATED(...) _DEPRECATED(, ##__VA_ARGS__, _DEPRECATED_1(__VA_ARGS__), _DEPRECATED_0())
 
 // C++ 17
 #if __cplusplus >= 201703L

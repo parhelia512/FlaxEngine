@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if GRAPHICS_API_VULKAN
 
@@ -20,18 +20,18 @@
 // Ensure to match the indirect commands arguments layout
 static_assert(sizeof(GPUDispatchIndirectArgs) == sizeof(VkDispatchIndirectCommand), "Wrong size of GPUDrawIndirectArgs.");
 static_assert(OFFSET_OF(GPUDispatchIndirectArgs, ThreadGroupCountX) == OFFSET_OF(VkDispatchIndirectCommand, x), "Wrong offset for GPUDrawIndirectArgs::ThreadGroupCountX");
-static_assert(OFFSET_OF(GPUDispatchIndirectArgs, ThreadGroupCountY) == OFFSET_OF(VkDispatchIndirectCommand, y),"Wrong offset for GPUDrawIndirectArgs::ThreadGroupCountY");
+static_assert(OFFSET_OF(GPUDispatchIndirectArgs, ThreadGroupCountY) == OFFSET_OF(VkDispatchIndirectCommand, y), "Wrong offset for GPUDrawIndirectArgs::ThreadGroupCountY");
 static_assert(OFFSET_OF(GPUDispatchIndirectArgs, ThreadGroupCountZ) == OFFSET_OF(VkDispatchIndirectCommand, z), "Wrong offset for GPUDrawIndirectArgs::ThreadGroupCountZ");
 //
 static_assert(sizeof(GPUDrawIndirectArgs) == sizeof(VkDrawIndirectCommand), "Wrong size of GPUDrawIndirectArgs.");
 static_assert(OFFSET_OF(GPUDrawIndirectArgs, VerticesCount) == OFFSET_OF(VkDrawIndirectCommand, vertexCount), "Wrong offset for GPUDrawIndirectArgs::VerticesCount");
-static_assert(OFFSET_OF(GPUDrawIndirectArgs, InstanceCount) == OFFSET_OF(VkDrawIndirectCommand, instanceCount),"Wrong offset for GPUDrawIndirectArgs::InstanceCount");
+static_assert(OFFSET_OF(GPUDrawIndirectArgs, InstanceCount) == OFFSET_OF(VkDrawIndirectCommand, instanceCount), "Wrong offset for GPUDrawIndirectArgs::InstanceCount");
 static_assert(OFFSET_OF(GPUDrawIndirectArgs, StartVertex) == OFFSET_OF(VkDrawIndirectCommand, firstVertex), "Wrong offset for GPUDrawIndirectArgs::StartVertex");
 static_assert(OFFSET_OF(GPUDrawIndirectArgs, StartInstance) == OFFSET_OF(VkDrawIndirectCommand, firstInstance), "Wrong offset for GPUDrawIndirectArgs::StartInstance");
 //
 static_assert(sizeof(GPUDrawIndexedIndirectArgs) == sizeof(VkDrawIndexedIndirectCommand), "Wrong size of GPUDrawIndexedIndirectArgs.");
 static_assert(OFFSET_OF(GPUDrawIndexedIndirectArgs, IndicesCount) == OFFSET_OF(VkDrawIndexedIndirectCommand, indexCount), "Wrong offset for GPUDrawIndexedIndirectArgs::IndicesCount");
-static_assert(OFFSET_OF(GPUDrawIndexedIndirectArgs, InstanceCount) == OFFSET_OF(VkDrawIndexedIndirectCommand, instanceCount),"Wrong offset for GPUDrawIndexedIndirectArgs::InstanceCount");
+static_assert(OFFSET_OF(GPUDrawIndexedIndirectArgs, InstanceCount) == OFFSET_OF(VkDrawIndexedIndirectCommand, instanceCount), "Wrong offset for GPUDrawIndexedIndirectArgs::InstanceCount");
 static_assert(OFFSET_OF(GPUDrawIndexedIndirectArgs, StartIndex) == OFFSET_OF(VkDrawIndexedIndirectCommand, firstIndex), "Wrong offset for GPUDrawIndexedIndirectArgs::StartIndex");
 static_assert(OFFSET_OF(GPUDrawIndexedIndirectArgs, StartVertex) == OFFSET_OF(VkDrawIndexedIndirectCommand, vertexOffset), "Wrong offset for GPUDrawIndexedIndirectArgs::StartVertex");
 static_assert(OFFSET_OF(GPUDrawIndexedIndirectArgs, StartInstance) == OFFSET_OF(VkDrawIndexedIndirectCommand, firstInstance), "Wrong offset for GPUDrawIndexedIndirectArgs::StartInstance");
@@ -72,55 +72,19 @@ const Char* ToString(VkImageLayout layout)
 
 #endif
 
-void PipelineBarrierVulkan::AddImageBarrier(VkImage image, const VkImageSubresourceRange& range, VkImageLayout srcLayout, VkImageLayout dstLayout, GPUTextureViewVulkan* handle)
-{
-#if VK_ENABLE_BARRIERS_DEBUG
-    ImageBarriersDebug.Add(handle);
-#endif
-    VkImageMemoryBarrier& imageBarrier = ImageBarriers.AddOne();
-    RenderToolsVulkan::ZeroStruct(imageBarrier, VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER);
-    imageBarrier.image = image;
-    imageBarrier.subresourceRange = range;
-    imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    imageBarrier.oldLayout = srcLayout;
-    imageBarrier.newLayout = dstLayout;
-    SourceStage |= RenderToolsVulkan::GetImageBarrierFlags(srcLayout, imageBarrier.srcAccessMask);
-    DestStage |= RenderToolsVulkan::GetImageBarrierFlags(dstLayout, imageBarrier.dstAccessMask);
-#if VK_ENABLE_BARRIERS_DEBUG
-    LOG(Warning, "Image Barrier: 0x{0:x}, {1} -> {2} for baseMipLevel: {3}, baseArrayLayer: {4}, levelCount: {5}, layerCount: {6} ({7})",
-        (uintptr)image,
-        ToString(srcLayout),
-        ToString(dstLayout),
-        range.baseMipLevel,
-        range.baseArrayLayer,
-        range.levelCount,
-        range.layerCount,
-        handle && handle->Owner->AsGPUResource() ? handle->Owner->AsGPUResource()->ToString() : String::Empty
-    );
-#endif
-}
-
-void PipelineBarrierVulkan::AddBufferBarrier(VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size, VkAccessFlags srcAccess, VkAccessFlags dstAccess)
-{
-    VkBufferMemoryBarrier& bufferBarrier = BufferBarriers.AddOne();
-    RenderToolsVulkan::ZeroStruct(bufferBarrier, VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER);
-    bufferBarrier.buffer = buffer;
-    bufferBarrier.offset = offset;
-    bufferBarrier.size = size;
-    bufferBarrier.srcAccessMask = srcAccess;
-    bufferBarrier.dstAccessMask = dstAccess;
-    bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    SourceStage |= RenderToolsVulkan::GetBufferBarrierFlags(srcAccess);
-    DestStage |= RenderToolsVulkan::GetBufferBarrierFlags(dstAccess);
-}
-
-void PipelineBarrierVulkan::Execute(CmdBufferVulkan* cmdBuffer)
+void PipelineBarrierVulkan::Execute(const CmdBufferVulkan* cmdBuffer)
 {
     ASSERT(cmdBuffer->IsOutsideRenderPass());
     vkCmdPipelineBarrier(cmdBuffer->GetHandle(), SourceStage, DestStage, 0, 0, nullptr, BufferBarriers.Count(), BufferBarriers.Get(), ImageBarriers.Count(), ImageBarriers.Get());
-    Reset();
+
+    // Reset
+    SourceStage = 0;
+    DestStage = 0;
+    ImageBarriers.Clear();
+    BufferBarriers.Clear();
+#if VK_ENABLE_BARRIERS_DEBUG
+	ImageBarriersDebug.Clear();
+#endif
 }
 
 GPUContextVulkan::GPUContextVulkan(GPUDeviceVulkan* device, QueueVulkan* queue)
@@ -154,7 +118,7 @@ GPUContextVulkan::~GPUContextVulkan()
     Delete(_cmdBufferManager);
 }
 
-void GPUContextVulkan::AddImageBarrier(VkImage image, VkImageLayout srcLayout, VkImageLayout dstLayout, VkImageSubresourceRange& subresourceRange, GPUTextureViewVulkan* handle)
+void GPUContextVulkan::AddImageBarrier(VkImage image, VkImageLayout srcLayout, VkImageLayout dstLayout, const VkImageSubresourceRange& subresourceRange, GPUTextureViewVulkan* handle)
 {
 #if VK_ENABLE_BARRIERS_BATCHING
     // Auto-flush on overflow
@@ -168,7 +132,31 @@ void GPUContextVulkan::AddImageBarrier(VkImage image, VkImageLayout srcLayout, V
 #endif
 
     // Insert barrier
-    _barriers.AddImageBarrier(image, subresourceRange, srcLayout, dstLayout, handle);
+#if VK_ENABLE_BARRIERS_DEBUG
+    _barriers.ImageBarriersDebug.Add(handle);
+#endif
+    VkImageMemoryBarrier& imageBarrier = _barriers.ImageBarriers.AddOne();
+    RenderToolsVulkan::ZeroStruct(imageBarrier, VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER);
+    imageBarrier.image = image;
+    imageBarrier.subresourceRange = subresourceRange;
+    imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    imageBarrier.oldLayout = srcLayout;
+    imageBarrier.newLayout = dstLayout;
+    _barriers.SourceStage |= RenderToolsVulkan::GetImageBarrierFlags(srcLayout, imageBarrier.srcAccessMask);
+    _barriers.DestStage |= RenderToolsVulkan::GetImageBarrierFlags(dstLayout, imageBarrier.dstAccessMask);
+#if VK_ENABLE_BARRIERS_DEBUG
+    LOG(Warning, "Image Barrier: 0x{0:x}, {1} -> {2} for baseMipLevel: {3}, baseArrayLayer: {4}, levelCount: {5}, layerCount: {6} ({7})",
+        (uintptr)image,
+        ::ToString(srcLayout),
+        ::ToString(dstLayout),
+        subresourceRange.baseMipLevel,
+        subresourceRange.baseArrayLayer,
+        subresourceRange.levelCount,
+        subresourceRange.layerCount,
+        handle && handle->Owner->AsGPUResource() ? handle->Owner->AsGPUResource()->ToString() : String::Empty
+    );
+#endif
 
 #if !VK_ENABLE_BARRIERS_BATCHING
     // Auto-flush without batching
@@ -306,7 +294,17 @@ void GPUContextVulkan::AddBufferBarrier(GPUBufferVulkan* buffer, VkAccessFlags d
 #endif
 
     // Insert barrier
-    _barriers.AddBufferBarrier(buffer->GetHandle(), 0, buffer->GetSize(), buffer->Access, dstAccess);
+    VkBufferMemoryBarrier& bufferBarrier = _barriers.BufferBarriers.AddOne();
+    RenderToolsVulkan::ZeroStruct(bufferBarrier, VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER);
+    bufferBarrier.buffer = buffer->GetHandle();
+    bufferBarrier.offset = 0;
+    bufferBarrier.size = buffer->GetSize();
+    bufferBarrier.srcAccessMask = buffer->Access;
+    bufferBarrier.dstAccessMask = dstAccess;
+    bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    _barriers.SourceStage |= RenderToolsVulkan::GetBufferBarrierFlags(buffer->Access);
+    _barriers.DestStage |= RenderToolsVulkan::GetBufferBarrierFlags(dstAccess);
     buffer->Access = dstAccess;
 
 #if !VK_ENABLE_BARRIERS_BATCHING
@@ -337,13 +335,12 @@ DescriptorPoolVulkan* GPUContextVulkan::AllocateDescriptorSets(const VkDescripto
     VkDescriptorSetAllocateInfo allocateInfo = descriptorSetAllocateInfo;
     DescriptorPoolVulkan* pool = nullptr;
 
-    const uint32 hash = VULKAN_HASH_POOLS_WITH_TYPES_USAGE_ID ? layout.GetTypesUsageID() : GetHash(layout);
+    const uint32 hash = VULKAN_HASH_POOLS_WITH_LAYOUT_TYPES ? layout.SetLayoutsHash : GetHash(layout);
     DescriptorPoolArray* typedDescriptorPools = _descriptorPools.TryGet(hash);
 
     if (typedDescriptorPools != nullptr)
     {
         pool = typedDescriptorPools->HasItems() ? typedDescriptorPools->Last() : nullptr;
-
         if (pool && pool->CanAllocate(layout))
         {
             allocateInfo.descriptorPool = pool->GetHandle();
@@ -363,7 +360,6 @@ DescriptorPoolVulkan* GPUContextVulkan::AllocateDescriptorSets(const VkDescripto
         }
         else
         {
-            // Spec says any negative value could be due to fragmentation, so create a new Pool. If it fails here then we really are out of memory!
             pool = New<DescriptorPoolVulkan>(_device, layout);
             typedDescriptorPools->Add(pool);
             allocateInfo.descriptorPool = pool->GetHandle();
@@ -404,8 +400,18 @@ void GPUContextVulkan::BeginRenderPass()
     if (_rtDepth)
     {
         handle = _rtDepth;
-        layout.ReadDepth = true; // TODO: use proper depthStencilAccess flags
-        layout.WriteDepth = handle->LayoutRTV == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL; // TODO: do it in a proper way
+        layout.ReadDepth = true;
+        layout.ReadStencil = PixelFormatExtensions::HasStencil(handle->GetFormat());
+        layout.WriteDepth = handle->LayoutRTV == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL || handle->LayoutRTV == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL || handle->LayoutRTV == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        layout.WriteStencil = handle->LayoutRTV == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL || handle->LayoutRTV == VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL || handle->LayoutRTV == VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL;
+        if (_currentState && 0)
+        {
+            // TODO: use this but only if state doesn't change during whole render pass (eg. 1st draw call might not draw depth but 2nd might)
+            layout.ReadDepth &= _currentState->DepthReadEnable;
+            layout.ReadStencil &= _currentState->StencilReadEnable;
+            layout.WriteDepth &= _currentState->DepthWriteEnable;
+            layout.WriteStencil &= _currentState->StencilWriteEnable;
+        }
         framebufferKey.AttachmentCount++;
         framebufferKey.Attachments[_rtCount] = handle->GetFramebufferView();
         AddImageBarrier(handle, handle->LayoutRTV);
@@ -571,55 +577,6 @@ void GPUContextVulkan::UpdateDescriptorSets(const SpirvShaderDescriptorInfo& des
     }
 }
 
-void GPUContextVulkan::UpdateDescriptorSets(GPUPipelineStateVulkan* pipelineState)
-{
-    const auto cmdBuffer = _cmdBufferManager->GetCmdBuffer();
-    const auto pipelineLayout = pipelineState->GetLayout();
-    ASSERT(pipelineLayout);
-    bool needsWrite = false;
-
-    // No current descriptor pools set - acquire one and reset
-    const bool newDescriptorPool = pipelineState->AcquirePoolSet(cmdBuffer);
-    needsWrite |= newDescriptorPool;
-
-    // Update descriptors for every used shader stage
-    uint32 remainingHasDescriptorsPerStageMask = pipelineState->HasDescriptorsPerStageMask;
-    for (int32 stage = 0; stage < DescriptorSet::GraphicsStagesCount && remainingHasDescriptorsPerStageMask; stage++)
-    {
-        // Only process stages that exist in this pipeline and use descriptors
-        if (remainingHasDescriptorsPerStageMask & 1)
-        {
-            UpdateDescriptorSets(*pipelineState->DescriptorInfoPerStage[stage], pipelineState->DSWriter[stage], needsWrite);
-        }
-
-        remainingHasDescriptorsPerStageMask >>= 1;
-    }
-
-    // Allocate sets if need to
-    //if (needsWrite) // TODO: write on change only?
-    {
-        if (!pipelineState->AllocateDescriptorSets())
-        {
-            return;
-        }
-        uint32 remainingStagesMask = pipelineState->HasDescriptorsPerStageMask;
-        uint32 stage = 0;
-        while (remainingStagesMask)
-        {
-            if (remainingStagesMask & 1)
-            {
-                const VkDescriptorSet descriptorSet = pipelineState->DescriptorSetHandles[stage];
-                pipelineState->DSWriter[stage].SetDescriptorSet(descriptorSet);
-            }
-
-            stage++;
-            remainingStagesMask >>= 1;
-        }
-
-        vkUpdateDescriptorSets(_device->Device, pipelineState->DSWriteContainer.DescriptorWrites.Count(), pipelineState->DSWriteContainer.DescriptorWrites.Get(), 0, nullptr);
-    }
-}
-
 void GPUContextVulkan::UpdateDescriptorSets(ComputePipelineStateVulkan* pipelineState)
 {
     const auto cmdBuffer = _cmdBufferManager->GetCmdBuffer();
@@ -654,8 +611,6 @@ void GPUContextVulkan::OnDrawCall()
     GPUPipelineStateVulkan* pipelineState = _currentState;
     ASSERT(pipelineState && pipelineState->IsValid());
     const auto cmdBuffer = _cmdBufferManager->GetCmdBuffer();
-    const auto pipelineLayout = pipelineState->GetLayout();
-    ASSERT(pipelineLayout);
 
     // End previous render pass if render targets layout was modified
     if (_rtDirtyFlag && cmdBuffer->IsInsideRenderPass())
@@ -663,7 +618,35 @@ void GPUContextVulkan::OnDrawCall()
 
     if (pipelineState->HasDescriptorsPerStageMask)
     {
-        UpdateDescriptorSets(pipelineState);
+        // Get descriptor pools set
+        bool needsWrite = pipelineState->AcquirePoolSet(cmdBuffer);
+
+        // Update descriptors for every used shader stage
+        uint32 remainingHasDescriptorsPerStageMask = pipelineState->HasDescriptorsPerStageMask;
+        for (int32 stage = 0; stage < DescriptorSet::GraphicsStagesCount && remainingHasDescriptorsPerStageMask; stage++)
+        {
+            if (remainingHasDescriptorsPerStageMask & 1)
+                UpdateDescriptorSets(*pipelineState->DescriptorInfoPerStage[stage], pipelineState->DSWriter[stage], needsWrite);
+            remainingHasDescriptorsPerStageMask >>= 1;
+        }
+
+        // Allocate sets if need to
+        //if (needsWrite) // TODO: write on change only?
+        {
+            if (!pipelineState->CurrentTypedDescriptorPoolSet->AllocateDescriptorSets(*pipelineState->DescriptorSetsLayout, pipelineState->DescriptorSetHandles.Get()))
+                return;
+            uint32 remainingStagesMask = pipelineState->HasDescriptorsPerStageMask;
+            uint32 stage = 0;
+            while (remainingStagesMask)
+            {
+                if (remainingStagesMask & 1)
+                    pipelineState->DSWriter[stage].SetDescriptorSet(pipelineState->DescriptorSetHandles[stage]);
+                remainingStagesMask >>= 1;
+                stage++;
+            }
+
+            vkUpdateDescriptorSets(_device->Device, pipelineState->DSWriteContainer.DescriptorWrites.Count(), pipelineState->DSWriteContainer.DescriptorWrites.Get(), 0, nullptr);
+        }
     }
 
     // Bind any missing vertex buffers to null if required by the current state
@@ -689,26 +672,30 @@ void GPUContextVulkan::OnDrawCall()
     }
 
     // Bind pipeline
-    if (_psDirtyFlag && _currentState && (_rtDepth || _rtCount))
+    if (_psDirtyFlag && pipelineState && (_rtDepth || _rtCount))
     {
         _psDirtyFlag = false;
         const auto cmdBuffer = _cmdBufferManager->GetCmdBuffer();
-        const auto pipeline = _currentState->GetState(_renderPass);
+        const auto pipeline = pipelineState->GetState(_renderPass);
         vkCmdBindPipeline(cmdBuffer->GetHandle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
         RENDER_STAT_PS_STATE_CHANGE();
     }
 
-    //UpdateDynamicStates();
-
     // Bind descriptors sets to the graphics pipeline
     if (pipelineState->HasDescriptorsPerStageMask)
     {
-        pipelineState->Bind(cmdBuffer);
+        vkCmdBindDescriptorSets(
+            cmdBuffer->GetHandle(),
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            pipelineState->GetLayout()->Handle,
+            0,
+            pipelineState->DescriptorSetHandles.Count(),
+            pipelineState->DescriptorSetHandles.Get(),
+            pipelineState->DynamicOffsets.Count(),
+            pipelineState->DynamicOffsets.Get());
     }
 
-    // Clear flag
     _rtDirtyFlag = false;
-
 #if VK_ENABLE_BARRIERS_DEBUG
     LOG(Warning, "Draw");
 #endif
@@ -736,11 +723,14 @@ void GPUContextVulkan::FrameBegin()
     Platform::MemoryCopy(_samplerHandles, _device->HelperResources.GetStaticSamplers(), sizeof(VkSampler) * GPU_STATIC_SAMPLERS_COUNT);
     Platform::MemoryClear(_samplerHandles + GPU_STATIC_SAMPLERS_COUNT, sizeof(_samplerHandles) - sizeof(VkSampler) * GPU_STATIC_SAMPLERS_COUNT);
 
+    // Init command buffer
+    const auto cmdBuffer = _cmdBufferManager->GetCmdBuffer();
+    vkCmdSetStencilReference(cmdBuffer->GetHandle(), VK_STENCIL_FRONT_AND_BACK, _stencilRef);
+
 #if VULKAN_RESET_QUERY_POOLS
     // Reset pending queries
     if (_device->QueriesToReset.HasItems())
     {
-        const auto cmdBuffer = _cmdBufferManager->GetCmdBuffer();
         for (auto query : _device->QueriesToReset)
             query->Reset(cmdBuffer);
         _device->QueriesToReset.Clear();
@@ -810,10 +800,9 @@ void GPUContextVulkan::Clear(GPUTextureView* rt, const Color& color)
     }
 }
 
-void GPUContextVulkan::ClearDepth(GPUTextureView* depthBuffer, float depthValue)
+void GPUContextVulkan::ClearDepth(GPUTextureView* depthBuffer, float depthValue, uint8 stencilValue)
 {
     const auto rtVulkan = static_cast<GPUTextureViewVulkan*>(depthBuffer);
-
     if (rtVulkan)
     {
         // TODO: detect if inside render pass and use ClearAttachments
@@ -828,7 +817,7 @@ void GPUContextVulkan::ClearDepth(GPUTextureView* depthBuffer, float depthValue)
 
         VkClearDepthStencilValue clear;
         clear.depth = depthValue;
-        clear.stencil = 0;
+        clear.stencil = stencilValue;
         vkCmdClearDepthStencilImage(cmdBuffer->GetHandle(), rtVulkan->Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear, 1, &rtVulkan->Info.subresourceRange);
     }
 }
@@ -1324,13 +1313,13 @@ void GPUContextVulkan::UpdateBuffer(GPUBuffer* buffer, const void* data, uint32 
     vkCmdPipelineBarrier(cmdBuffer->GetHandle(), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &barrierBefore, 0, nullptr, 0, nullptr);
 
     // Use direct update for small buffers
-    if (size <= 16 * 1024)
+    const uint32 alignedSize = Math::AlignUp<uint32>(size, 4);
+    if (size <= 16 * 1024 && alignedSize <= buffer->GetSize())
     {
         //AddBufferBarrier(bufferVulkan, VK_ACCESS_TRANSFER_WRITE_BIT);
         //FlushBarriers();
 
-        size = Math::AlignUp<uint32>(size, 4);
-        vkCmdUpdateBuffer(cmdBuffer->GetHandle(), bufferVulkan->GetHandle(), offset, size, data);
+        vkCmdUpdateBuffer(cmdBuffer->GetHandle(), bufferVulkan->GetHandle(), offset, alignedSize, data);
     }
     else
     {
@@ -1423,37 +1412,77 @@ void GPUContextVulkan::CopyTexture(GPUTexture* dstResource, uint32 dstSubresourc
     const auto dstTextureVulkan = static_cast<GPUTextureVulkan*>(dstResource);
     const auto srcTextureVulkan = static_cast<GPUTextureVulkan*>(srcResource);
 
-    // Transition resources
-    AddImageBarrier(dstTextureVulkan, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    AddImageBarrier(srcTextureVulkan, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-    FlushBarriers();
-
-    // Prepare
-    const int32 dstMipIndex = dstSubresource % dstTextureVulkan->MipLevels();
-    const int32 dstArrayIndex = dstSubresource / dstTextureVulkan->MipLevels();
-    const int32 srcMipIndex = srcSubresource % srcTextureVulkan->MipLevels();
-    const int32 srcArrayIndex = srcSubresource / srcTextureVulkan->MipLevels();
+    const int32 dstMipIndex = (int32)dstSubresource % dstTextureVulkan->MipLevels();
+    const int32 dstArrayIndex = (int32)dstSubresource / dstTextureVulkan->MipLevels();
+    const int32 srcMipIndex = (int32)srcSubresource % srcTextureVulkan->MipLevels();
+    const int32 srcArrayIndex = (int32)srcSubresource / srcTextureVulkan->MipLevels();
     int32 mipWidth, mipHeight, mipDepth;
     srcTextureVulkan->GetMipSize(srcMipIndex, mipWidth, mipHeight, mipDepth);
 
-    // Copy
-    VkImageCopy region;
-    Platform::MemoryClear(&region, sizeof(VkBufferImageCopy));
-    region.extent.width = mipWidth;
-    region.extent.height = mipHeight;
-    region.extent.depth = mipDepth;
-    region.dstOffset.x = dstX;
-    region.dstOffset.y = dstY;
-    region.dstOffset.z = dstZ;
-    region.srcSubresource.baseArrayLayer = srcArrayIndex;
-    region.srcSubresource.layerCount = 1;
-    region.srcSubresource.mipLevel = srcMipIndex;
-    region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    region.dstSubresource.baseArrayLayer = dstArrayIndex;
-    region.dstSubresource.layerCount = 1;
-    region.dstSubresource.mipLevel = dstMipIndex;
-    region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    vkCmdCopyImage(cmdBuffer->GetHandle(), srcTextureVulkan->GetHandle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstTextureVulkan->GetHandle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    if (dstTextureVulkan->IsStaging())
+    {
+        // Staging Texture -> Staging Texture
+        if (srcTextureVulkan->IsStaging())
+        {
+            ASSERT(dstTextureVulkan->StagingBuffer && srcTextureVulkan->StagingBuffer);
+            CopyResource(dstTextureVulkan->StagingBuffer, srcTextureVulkan->StagingBuffer);
+        }
+        // Texture -> Staging Texture
+        else
+        {
+            // Transition resources
+            ASSERT(dstTextureVulkan->StagingBuffer);
+            AddBufferBarrier(dstTextureVulkan->StagingBuffer, VK_ACCESS_TRANSFER_WRITE_BIT);
+            AddImageBarrier(srcTextureVulkan, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+            FlushBarriers();
+
+            // Copy
+            VkBufferImageCopy region;
+            Platform::MemoryClear(&region, sizeof(VkBufferImageCopy));
+            region.bufferOffset = 0; // TODO: calculate it based on dstSubresource and dstX/dstY/dstZ
+            ASSERT(dstX == dstY == dstZ == 0);
+            ASSERT(dstSubresource == 0);
+            region.bufferRowLength = mipWidth;
+            region.bufferImageHeight = mipHeight;
+            region.imageOffset.x = 0;
+            region.imageOffset.y = 0;
+            region.imageOffset.z = 0;
+            region.imageExtent.width = mipWidth;
+            region.imageExtent.height = mipHeight;
+            region.imageExtent.depth = mipDepth;
+            region.imageSubresource.baseArrayLayer = srcArrayIndex;
+            region.imageSubresource.layerCount = 1;
+            region.imageSubresource.mipLevel = srcMipIndex;
+            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            vkCmdCopyImageToBuffer(cmdBuffer->GetHandle(), srcTextureVulkan->GetHandle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstTextureVulkan->StagingBuffer->GetHandle(), 1, &region);
+        }
+    }
+    else
+    {
+        // Transition resources
+        AddImageBarrier(dstTextureVulkan, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        AddImageBarrier(srcTextureVulkan, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        FlushBarriers();
+
+        // Copy
+        VkImageCopy region;
+        Platform::MemoryClear(&region, sizeof(VkBufferImageCopy));
+        region.extent.width = mipWidth;
+        region.extent.height = mipHeight;
+        region.extent.depth = mipDepth;
+        region.dstOffset.x = (int32_t)dstX;
+        region.dstOffset.y = (int32_t)dstY;
+        region.dstOffset.z = (int32_t)dstZ;
+        region.srcSubresource.baseArrayLayer = srcArrayIndex;
+        region.srcSubresource.layerCount = 1;
+        region.srcSubresource.mipLevel = srcMipIndex;
+        region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.dstSubresource.baseArrayLayer = dstArrayIndex;
+        region.dstSubresource.layerCount = 1;
+        region.dstSubresource.mipLevel = dstMipIndex;
+        region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        vkCmdCopyImage(cmdBuffer->GetHandle(), srcTextureVulkan->GetHandle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstTextureVulkan->GetHandle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    }
 }
 
 void GPUContextVulkan::ResetCounter(GPUBuffer* buffer)
