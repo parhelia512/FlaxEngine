@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Globalization;
@@ -14,7 +14,7 @@ namespace FlaxEditor.GUI.Timeline.GUI
     class Background : ContainerControl
     {
         private readonly Timeline _timeline;
-        private float[] _tickSteps;
+        private double[] _tickSteps;
         private float[] _tickStrengths;
         private bool _isSelecting;
         private Float2 _selectingStartPos = Float2.Minimum;
@@ -28,7 +28,6 @@ namespace FlaxEditor.GUI.Timeline.GUI
         {
             _timeline = timeline;
             _tickSteps = Utilities.Utils.CurveTickSteps;
-            _tickStrengths = new float[_tickSteps.Length];
         }
 
         private void UpdateSelectionRectangle()
@@ -173,62 +172,27 @@ namespace FlaxEditor.GUI.Timeline.GUI
             var rightFrame = Mathf.Ceil((right - Timeline.StartOffset) / zoom) * _timeline.FramesPerSecond;
             var min = leftFrame;
             var max = rightFrame;
-            int smallestTick = 0;
-            int biggestTick = _tickSteps.Length - 1;
-            for (int i = _tickSteps.Length - 1; i >= 0; i--)
-            {
-                // Calculate how far apart these modulo tick steps are spaced
-                float tickSpacing = _tickSteps[i] * _timeline.Zoom;
-
-                // Calculate the strength of the tick markers based on the spacing
-                _tickStrengths[i] = Mathf.Saturate((tickSpacing - minDistanceBetweenTicks) / (maxDistanceBetweenTicks - minDistanceBetweenTicks));
-
-                // Beyond threshold the ticks don't get any bigger or fatter
-                if (_tickStrengths[i] >= 1)
-                    biggestTick = i;
-
-                // Do not show small tick markers
-                if (tickSpacing <= minDistanceBetweenTicks)
-                {
-                    smallestTick = i;
-                    break;
-                }
-            }
-            int tickLevels = biggestTick - smallestTick + 1;
 
             // Draw vertical lines for time axis
-            for (int level = 0; level < tickLevels; level++)
+            var pixelsInRange = _timeline.Zoom;
+            var pixelRange = pixelsInRange * (max - min);
+            var tickRange = Utilities.Utils.DrawCurveTicks((decimal tick, double step, float strength) =>
             {
-                float strength = _tickStrengths[smallestTick + level];
-                if (strength <= Mathf.Epsilon)
-                    continue;
-
-                // Draw all ticks
-                int l = Mathf.Clamp(smallestTick + level, 0, _tickSteps.Length - 1);
-                var lStep = _tickSteps[l];
-                var lNextStep = _tickSteps[l + 1];
-                int startTick = Mathf.FloorToInt(min / lStep);
-                int endTick = Mathf.CeilToInt(max / lStep);
-                Color lineColor = style.ForegroundDisabled.RGBMultiplied(0.7f).AlphaMultiplied(strength);
-                for (int i = startTick; i <= endTick; i++)
-                {
-                    if (l < biggestTick && (i % Mathf.RoundToInt(lNextStep / lStep) == 0))
-                        continue;
-                    var tick = i * lStep;
-                    var time = tick / _timeline.FramesPerSecond;
-                    var x = time * zoom + Timeline.StartOffset;
-
-                    // Draw line
-                    Render2D.FillRectangle(new Rectangle(x - 0.5f, 0, 1.0f, height), lineColor);
-                }
-            }
+                var time = (float)tick / _timeline.FramesPerSecond;
+                var x = time * zoom + Timeline.StartOffset;
+                var lineColor = style.ForegroundDisabled.RGBMultiplied(0.7f).AlphaMultiplied(strength);
+                Render2D.FillRectangle(new Rectangle(x - 0.5f, 0, 1.0f, height), lineColor);
+            }, _tickSteps, ref _tickStrengths, min, max, pixelRange, minDistanceBetweenTicks, maxDistanceBetweenTicks);
+            var smallestTick = tickRange.X;
+            var biggestTick = tickRange.Y;
+            var tickLevels = biggestTick - smallestTick + 1;
 
             // Draw selection rectangle
             if (_isSelecting)
             {
                 var selectionRect = Rectangle.FromPoints(_selectingStartPos, _mousePos);
-                Render2D.FillRectangle(selectionRect, Color.Orange * 0.4f);
-                Render2D.DrawRectangle(selectionRect, Color.Orange);
+                Render2D.FillRectangle(selectionRect, style.Selection);
+                Render2D.DrawRectangle(selectionRect, style.SelectionBorder);
             }
 
             DrawChildren();
@@ -266,23 +230,23 @@ namespace FlaxEditor.GUI.Timeline.GUI
                     continue;
 
                 // Draw all ticks
-                int l = Mathf.Clamp(smallestTick + level, 0, _tickSteps.Length - 1);
+                int l = Mathf.Clamp(smallestTick + level, 0, _tickSteps.Length - 2);
                 var lStep = _tickSteps[l];
                 var lNextStep = _tickSteps[l + 1];
-                int startTick = Mathf.FloorToInt(min / lStep);
-                int endTick = Mathf.CeilToInt(max / lStep);
+                var startTick = Mathd.FloorToInt(min / lStep);
+                var endTick = Mathd.CeilToInt(max / lStep);
                 Color lineColor = style.Foreground.RGBMultiplied(0.8f).AlphaMultiplied(strength);
                 Color labelColor = style.ForegroundDisabled.AlphaMultiplied(strength);
-                for (int i = startTick; i <= endTick; i++)
+                for (var i = startTick; i <= endTick; i++)
                 {
-                    if (l < biggestTick && (i % Mathf.RoundToInt(lNextStep / lStep) == 0))
+                    if (l < biggestTick && (i % Mathd.RoundToInt(lNextStep / lStep) == 0))
                         continue;
-                    var tick = i * lStep;
-                    var time = tick / _timeline.FramesPerSecond;
-                    var x = time * zoom + Timeline.StartOffset;
+                    var tick = (decimal)lStep * i;
+                    var time = (double)tick / _timeline.FramesPerSecond;
+                    var x = (float)time * zoom + Timeline.StartOffset;
 
                     // Header line
-                    var lineRect = new Rectangle(x - 0.5f, -verticalLinesHeaderExtend * 0.6f + timeAxisHeaderOffset, 1.0f, verticalLinesHeaderExtend * 0.6f);
+                    var lineRect = new Rectangle((float)x - 0.5f, -verticalLinesHeaderExtend * 0.6f + timeAxisHeaderOffset, 1.0f, verticalLinesHeaderExtend * 0.6f);
                     Render2D.FillRectangle(lineRect, lineColor);
 
                     // Time label

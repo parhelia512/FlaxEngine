@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -153,6 +153,9 @@ public:
 
 public:
     // [BinaryAsset]
+#if USE_EDITOR
+    void GetReferences(Array<Guid>& assets, Array<String>& files) const override;
+#endif
     uint64 GetMemoryUsage() const override;
     void OnScriptingDispose() override;
 

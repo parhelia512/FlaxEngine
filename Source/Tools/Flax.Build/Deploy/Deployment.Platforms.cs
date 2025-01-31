@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Flax Engine. All rights reserved.
+// Copyright (c) 2012-2024 Flax Engine. All rights reserved.
 
 using System.Collections.Generic;
 using System.IO;
@@ -28,6 +28,18 @@ namespace Flax.Deploy
                 string dst = Path.Combine(Deployer.PackageOutputPath, platformName);
                 Utilities.DirectoryDelete(dst);
 
+                // Deploy debug files for crashes debugging
+                foreach (var configuration in new[] { TargetConfiguration.Debug, TargetConfiguration.Development, TargetConfiguration.Release  })
+                {
+                    if (platform == TargetPlatform.Windows)
+                    {
+                        var dstDebug = Path.Combine(Deployer.PackageOutputPath, $"GameDebugSymbols/{platform}/{configuration}");
+                        Directory.CreateDirectory(dstDebug);
+                        var binaries = Path.Combine(src, "Binaries", "Game", "x64", configuration.ToString());
+                        DeployFiles(binaries, dstDebug, "*.pdb");
+                    }
+                }
+
                 // Deploy files
                 {
                     DeployFolder(platformsRoot, Deployer.PackageOutputPath, platformName);
@@ -35,9 +47,12 @@ namespace Flax.Deploy
                     // For Linux don't deploy engine libs used by C++ scripting linking (engine source required)
                     if (platform == TargetPlatform.Linux)
                     {
-                        File.Delete(Path.Combine(dst, "Binaries", "Game", "x64", "Debug", "FlaxGame.a"));
-                        File.Delete(Path.Combine(dst, "Binaries", "Game", "x64", "Development", "FlaxGame.a"));
-                        File.Delete(Path.Combine(dst, "Binaries", "Game", "x64", "Release", "FlaxGame.a"));
+                        Utilities.FileDelete(Path.Combine(dst, "Binaries", "Game", "x64", "Debug", "FlaxGame.a"));
+                        Utilities.FileDelete(Path.Combine(dst, "Binaries", "Game", "x64", "Development", "FlaxGame.a"));
+                        Utilities.FileDelete(Path.Combine(dst, "Binaries", "Game", "x64", "Release", "FlaxGame.a"));
+                        Utilities.FileDelete(Path.Combine(dst, "Binaries", "Game", "x64", "Debug", "FlaxEngine.a"));
+                        Utilities.FileDelete(Path.Combine(dst, "Binaries", "Game", "x64", "Development", "FlaxEngine.a"));
+                        Utilities.FileDelete(Path.Combine(dst, "Binaries", "Game", "x64", "Release", "FlaxEngine.a"));
                     }
 
                     // Sign binaries
@@ -45,29 +60,32 @@ namespace Flax.Deploy
                     {
                         var binaries = Path.Combine(dst, "Binaries", "Game", "x64", "Debug");
                         CodeSign(Path.Combine(binaries, "FlaxGame.exe"));
+                        CodeSign(Path.Combine(binaries, "FlaxEngine.dll"));
                         CodeSign(Path.Combine(binaries, "FlaxEngine.CSharp.dll"));
 
                         binaries = Path.Combine(dst, "Binaries", "Game", "x64", "Development");
                         CodeSign(Path.Combine(binaries, "FlaxGame.exe"));
+                        CodeSign(Path.Combine(binaries, "FlaxEngine.dll"));
                         CodeSign(Path.Combine(binaries, "FlaxEngine.CSharp.dll"));
 
                         binaries = Path.Combine(dst, "Binaries", "Game", "x64", "Release");
                         CodeSign(Path.Combine(binaries, "FlaxGame.exe"));
+                        CodeSign(Path.Combine(binaries, "FlaxEngine.dll"));
                         CodeSign(Path.Combine(binaries, "FlaxEngine.CSharp.dll"));
                     }
                     else if (platform == TargetPlatform.Mac)
                     {
                         var binaries = Path.Combine(dst, "Binaries", "Game", "arm64", "Debug");
                         CodeSign(Path.Combine(binaries, "FlaxGame"));
-                        CodeSign(Path.Combine(binaries, "FlaxGame.dylib"));
+                        CodeSign(Path.Combine(binaries, "FlaxEngine.dylib"));
 
                         binaries = Path.Combine(dst, "Binaries", "Game", "arm64", "Development");
                         CodeSign(Path.Combine(binaries, "FlaxGame"));
-                        CodeSign(Path.Combine(binaries, "FlaxGame.dylib"));
+                        CodeSign(Path.Combine(binaries, "FlaxEngine.dylib"));
 
                         binaries = Path.Combine(dst, "Binaries", "Game", "arm64", "Release");
                         CodeSign(Path.Combine(binaries, "FlaxGame"));
-                        CodeSign(Path.Combine(binaries, "FlaxGame.dylib"));
+                        CodeSign(Path.Combine(binaries, "FlaxEngine.dylib"));
                     }
 
                     // Don't distribute engine deps

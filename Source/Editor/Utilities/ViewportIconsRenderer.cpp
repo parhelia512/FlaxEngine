@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "ViewportIconsRenderer.h"
 #include "Engine/Core/Types/Variant.h"
@@ -21,6 +21,7 @@
 #include "Engine/Level/Actors/Sky.h"
 #include "Engine/Level/Actors/SkyLight.h"
 #include "Engine/Level/Actors/SpotLight.h"
+#include "Engine/Video/VideoPlayer.h"
 
 #define ICON_RADIUS 7.0f
 
@@ -187,6 +188,8 @@ void ViewportIconsRendererService::DrawIcons(RenderContext& renderContext, Scene
 
 void ViewportIconsRendererService::DrawIcons(RenderContext& renderContext, Actor* actor, Mesh::DrawInfo& draw)
 {
+    if (!actor || !actor->IsActiveInHierarchy())
+        return;
     auto& view = renderContext.View;
     const BoundingFrustum frustum = view.Frustum;
     Matrix m1, m2, world;
@@ -208,8 +211,7 @@ void ViewportIconsRendererService::DrawIcons(RenderContext& renderContext, Actor
         draw.DrawState = &drawState;
         draw.Deformation = nullptr;
 
-        // Support custom icons through types, but not onces that were added through actors,
-        // since they cant register while in prefab view anyway
+        // Support custom icons through types, but not ones that were added through actors, since they cant register while in prefab view anyway
         if (ActorTypeToTexture.TryGet(actor->GetTypeHandle(), texture))
         {
             // Use custom texture
@@ -282,6 +284,7 @@ bool ViewportIconsRendererService::Init()
     MAP_TYPE(Sky, Skybox);
     MAP_TYPE(SkyLight, SkyLight);
     MAP_TYPE(SpotLight, PointLight);
+    MAP_TYPE(VideoPlayer, SceneAnimationPlayer);
 #undef MAP_TYPE
 
     return false;

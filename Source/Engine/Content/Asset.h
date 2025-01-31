@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -34,11 +34,17 @@ public:
     DECLARE_ENUM_7(LoadResult, Ok, Failed, MissingDataChunk, CannotLoadData, CannotLoadStorage, CannotLoadInitData, InvalidData);
 
 protected:
-    volatile int64 _refCount;
-    ContentLoadTask* _loadingTask;
+    enum class LoadState : int64
+    {
+        Unloaded,
+        Loaded,
+        LoadFailed,
+    };
 
-    int8 _isLoaded : 1; // Indicates that asset is loaded
-    int8 _loadFailed : 1; // Indicates that last asset loading has failed
+    volatile int64 _refCount;
+    volatile int64 _loadState;
+    volatile intptr _loadingTask;
+
     int8 _deleteFileOnUnload : 1; // Indicates that asset source file should be removed on asset unload
     int8 _isVirtual : 1; // Indicates that asset is pure virtual (generated or temporary, has no storage so won't be saved)
 
@@ -97,7 +103,7 @@ public:
 
 public:
     /// <summary>
-    /// Gets the path to the asset storage file. In Editor it reflects the actual file, in cooked Game, it fakes the Editor path to be informative for developers.
+    /// Gets the path to the asset storage file. In Editor, it reflects the actual file, in cooked Game, it fakes the Editor path to be informative for developers.
     /// </summary>
     API_PROPERTY() virtual const String& GetPath() const = 0;
 
@@ -111,13 +117,16 @@ public:
     /// </summary>
     API_PROPERTY() FORCE_INLINE bool IsLoaded() const
     {
-        return _isLoaded != 0;
+        return Platform::AtomicRead(&_loadState) == (int64)LoadState::Loaded;
     }
 
     /// <summary>
     /// Returns true if last asset loading failed, otherwise false.
     /// </summary>
-    API_PROPERTY() bool LastLoadFailed() const;
+    API_PROPERTY() bool LastLoadFailed() const
+    {
+        return Platform::AtomicRead(&_loadState) == (int64)LoadState::LoadFailed;
+    }
 
     /// <summary>
     /// Determines whether this asset is virtual (generated or temporary, has no storage so it won't be saved).
@@ -170,10 +179,24 @@ public:
     /// For some asset types (e.g. scene or prefab) it may contain invalid asset ids due to not perfect gather method,
     /// which is optimized to perform scan very quickly. Before using those ids perform simple validation via Content cache API.
     /// The result collection contains only 1-level-deep references (only direct ones) and is invalid if asset is not loaded.
-    /// Also the output data may have duplicated asset ids or even invalid ids (Guid::Empty).
+    /// Also, the output data may have duplicated asset ids or even invalid ids (Guid::Empty).
+    /// </remarks>
+    /// <param name="assets">The output collection of the asset ids referenced by this asset.</param>
+    /// <param name="files">The output list of file paths referenced by this asset. Files might come from project Content folder (relative path is preserved in cooked game), or external location (copied into Content root folder of cooked game).</param>
+    virtual void GetReferences(Array<Guid, HeapAllocation>& assets, Array<String, HeapAllocation>& files) const;
+
+    /// <summary>
+    /// Gets the asset references. Supported only in Editor.
+    /// [Deprecated in v1.9]
+    /// </summary>
+    /// <remarks>
+    /// For some asset types (e.g. scene or prefab) it may contain invalid asset ids due to not perfect gather method,
+    /// which is optimized to perform scan very quickly. Before using those ids perform simple validation via Content cache API.
+    /// The result collection contains only 1-level-deep references (only direct ones) and is invalid if asset is not loaded.
+    /// Also, the output data may have duplicated asset ids or even invalid ids (Guid::Empty).
     /// </remarks>
     /// <param name="output">The output collection of the asset ids referenced by this asset.</param>
-    virtual void GetReferences(Array<Guid, HeapAllocation>& output) const;
+    DEPRECATED("Use GetReferences with assets and files parameter instead") virtual void GetReferences(Array<Guid, HeapAllocation>& output) const;
 
     /// <summary>
     /// Gets the asset references. Supported only in Editor.
@@ -182,7 +205,7 @@ public:
     /// For some asset types (e.g. scene or prefab) it may contain invalid asset ids due to not perfect gather method,
     /// which is optimized to perform scan very quickly. Before using those ids perform simple validation via Content cache API.
     /// The result collection contains only 1-level-deep references (only direct ones) and is invalid if asset is not loaded.
-    /// Also the output data may have duplicated asset ids or even invalid ids (Guid::Empty).
+    /// Also, the output data may have duplicated asset ids or even invalid ids (Guid::Empty).
     /// </remarks>
     /// <returns>The collection of the asset ids referenced by this asset.</returns>
     API_FUNCTION() Array<Guid, HeapAllocation> GetReferences() const;

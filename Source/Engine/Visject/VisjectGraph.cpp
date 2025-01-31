@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "VisjectGraph.h"
 #include "GraphUtilities.h"
@@ -79,6 +79,7 @@ void VisjectExecutor::ProcessGroupConstants(Box* box, Node* node, Value& value)
             value = cv.W;
         break;
     }
+    // Rotation
     case 8:
     {
         const float pitch = (float)node->Values[0];

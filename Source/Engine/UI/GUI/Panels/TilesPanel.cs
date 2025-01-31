@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 
@@ -8,6 +8,7 @@ namespace FlaxEngine.GUI
     /// Panel that arranges child controls like tiles.
     /// </summary>
     /// <seealso cref="FlaxEngine.GUI.ContainerControl" />
+    [ActorToolbox("GUI")]
     public class TilesPanel : ContainerControl
     {
         private Margin _tileMargin;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -302,8 +302,17 @@ namespace FlaxEditor.Windows.Assets
                     // TODO: improve the UI
                     layout.Space(40);
                     var addParamType = layout.ComboBox().ComboBox;
-                    addParamType.Items = AllowedTypes.Select(CustomEditorsUtil.GetTypeNameUI).ToList();
-                    addParamType.SelectedIndex = 0;
+                    object lastValue = null;
+                    foreach (var e in _proxy.DefaultValues)
+                        lastValue = e.Value;
+
+                    var allowedTypes = AllowedTypes.Select(CustomEditorsUtil.GetTypeNameUI).ToList();
+                    int index = 0;
+                    if (lastValue != null)
+                        index = allowedTypes.FindIndex(x => x.Equals(CustomEditorsUtil.GetTypeNameUI(lastValue.GetType()), StringComparison.Ordinal));
+
+                    addParamType.Items = allowedTypes;
+                    addParamType.SelectedIndex = index;
                     _addParamType = addParamType;
                     var addParamButton = layout.Button("Add").Button;
                     addParamButton.Clicked += OnAddParamButtonClicked;
@@ -413,10 +422,10 @@ namespace FlaxEditor.Windows.Assets
             _proxy = new PropertiesProxy();
             _propertiesEditor.Select(_proxy);
 
-            _saveButton = (ToolStripButton)_toolstrip.AddButton(editor.Icons.Save64, Save).LinkTooltip($"Save asset ({inputOptions.Save})");
+            _saveButton = _toolstrip.AddButton(editor.Icons.Save64, Save).LinkTooltip("Save", ref inputOptions.Save);
             _toolstrip.AddSeparator();
-            _undoButton = (ToolStripButton)_toolstrip.AddButton(Editor.Icons.Undo64, _undo.PerformUndo).LinkTooltip($"Undo ({inputOptions.Undo})");
-            _redoButton = (ToolStripButton)_toolstrip.AddButton(Editor.Icons.Redo64, _undo.PerformRedo).LinkTooltip($"Redo ({inputOptions.Redo})");
+            _undoButton = _toolstrip.AddButton(Editor.Icons.Undo64, _undo.PerformUndo).LinkTooltip("Undo", ref inputOptions.Undo);
+            _redoButton = _toolstrip.AddButton(Editor.Icons.Redo64, _undo.PerformRedo).LinkTooltip("Redo", ref inputOptions.Redo);
             _toolstrip.AddSeparator();
             _resetButton = (ToolStripButton)_toolstrip.AddButton(editor.Icons.Rotate32, Reset).LinkTooltip("Resets the variables values to the default values");
 
@@ -494,6 +503,7 @@ namespace FlaxEditor.Windows.Assets
             _undo.Enabled = false;
             _undo.Clear();
             _propertiesEditor.BuildLayoutOnUpdate();
+            UpdateToolstrip();
         }
 
         /// <inheritdoc />
@@ -504,6 +514,7 @@ namespace FlaxEditor.Windows.Assets
             _undo.Enabled = true;
             _undo.Clear();
             _propertiesEditor.BuildLayoutOnUpdate();
+            UpdateToolstrip();
         }
 
         /// <inheritdoc />

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -130,7 +130,7 @@ namespace FlaxEditor.GUI.Timeline.Tracks
             /// The keyframes.
             /// </summary>
             [EditorDisplay("Keyframes", EditorDisplayAttribute.InlineStyle), ExpandGroups]
-            [Collection(CanReorderItems = false, ReadOnly = true)]
+            [Collection(CanReorderItems = false, CanResize = true)]
             public List<KeyValuePair<string, object>> Keyframes;
 
             /// <inheritdoc />

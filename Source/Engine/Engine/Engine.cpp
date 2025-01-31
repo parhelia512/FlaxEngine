@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Engine.h"
 #include "Game.h"
@@ -60,6 +60,7 @@ namespace EngineImpl
 
 DateTime Engine::StartupTime;
 bool Engine::HasFocus = false;
+uint64 Engine::UpdateCount = 0;
 uint64 Engine::FrameCount = 0;
 Action Engine::FixedUpdate;
 Action Engine::Update;
@@ -69,6 +70,7 @@ Action Engine::LateFixedUpdate;
 Action Engine::Draw;
 Action Engine::Pause;
 Action Engine::Unpause;
+Action Engine::RequestingExit;
 Window* Engine::MainWindow = nullptr;
 
 int32 Engine::Main(const Char* cmdLine)
@@ -156,7 +158,7 @@ int32 Engine::Main(const Char* cmdLine)
 #endif
     Log::Logger::WriteFloor();
     LOG_FLUSH();
-    Time::OnBeforeRun();
+    Time::Synchronize();
     EngineImpl::IsReady = true;
 
     // Main engine loop
@@ -191,8 +193,17 @@ int32 Engine::Main(const Char* cmdLine)
             OnUnpause();
         }
 
+        // Use the same time for all ticks to improve synchronization
+        const double time = Platform::GetTimeSeconds();
+
+        // Update application (will gather data and other platform related events)
+        {
+            PROFILE_CPU_NAMED("Platform.Tick");
+            Platform::Tick();
+        }
+        
         // Update game logic
-        if (Time::OnBeginUpdate())
+        if (Time::OnBeginUpdate(time))
         {
             OnUpdate();
             OnLateUpdate();
@@ -200,7 +211,7 @@ int32 Engine::Main(const Char* cmdLine)
         }
 
         // Start physics simulation
-        if (Time::OnBeginPhysics())
+        if (Time::OnBeginPhysics(time))
         {
             OnFixedUpdate();
             OnLateFixedUpdate();
@@ -208,15 +219,12 @@ int32 Engine::Main(const Char* cmdLine)
         }
 
         // Draw frame
-        if (Time::OnBeginDraw())
+        if (Time::OnBeginDraw(time))
         {
             OnDraw();
             Time::OnEndDraw();
             FrameMark;
         }
-
-        // Collect physics simulation results (does nothing if Simulate hasn't been called in the previous loop step)
-        Physics::CollectResults();
     }
 
     // Call on exit event
@@ -244,16 +252,20 @@ void Engine::Exit(int32 exitCode)
 
 void Engine::RequestExit(int32 exitCode)
 {
+    if (Globals::IsRequestingExit)
+        return;
 #if USE_EDITOR
     // Send to editor (will leave play mode if need to)
     if (Editor::Managed->OnAppExit())
     {
         Globals::IsRequestingExit = true;
         Globals::ExitCode = exitCode;
+        RequestingExit();
     }
 #else
     Globals::IsRequestingExit = true;
     Globals::ExitCode = exitCode;
+    RequestingExit();
 #endif
 }
 
@@ -283,6 +295,9 @@ void Engine::OnLateFixedUpdate()
 {
     PROFILE_CPU_NAMED("Late Fixed Update");
 
+    // Collect physics simulation results (does nothing if Simulate hasn't been called in the previous loop step)
+    Physics::CollectResults();
+
     // Call event
     LateFixedUpdate();
 
@@ -294,11 +309,7 @@ void Engine::OnUpdate()
 {
     PROFILE_CPU_NAMED("Update");
 
-    // Update application (will gather data and other platform related events)
-    {
-        PROFILE_CPU_NAMED("Platform.Tick");
-        Platform::Tick();
-    }
+    UpdateCount++;
 
     const auto mainWindow = MainWindow;
 
@@ -322,10 +333,12 @@ void Engine::OnUpdate()
 
     // Call event
     Update();
-    UpdateGraph->Execute();
 
     // Update services
     EngineService::OnUpdate();
+
+    // Run async
+    UpdateGraph->Execute();
 }
 
 void Engine::OnLateUpdate()
@@ -461,7 +474,7 @@ void Engine::OnUnpause()
     LOG(Info, "App unpaused");
     Unpause();
 
-    Time::OnBeforeRun();
+    Time::Synchronize();
 }
 
 void Engine::OnExit()

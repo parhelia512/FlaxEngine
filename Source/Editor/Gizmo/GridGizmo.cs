@@ -1,7 +1,8 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEngine;
+using System.Runtime.InteropServices;
 
 namespace FlaxEditor.Gizmo
 {
@@ -15,76 +16,120 @@ namespace FlaxEditor.Gizmo
         [HideInEditor]
         private sealed class Renderer : PostProcessEffect
         {
-            private IntPtr _debugDrawContext;
+            [StructLayout(LayoutKind.Sequential)]
+            private struct Data
+            {
+                public Matrix WorldMatrix;
+                public Matrix ViewProjectionMatrix;
+                public Float4 GridColor;
+                public Float3 ViewPos;
+                public float Far;
+                public Float3 Padding;
+                public float GridSize;
+            }
+
+            private static readonly uint[] _triangles =
+            {
+                0, 2, 1, // Face front
+                1, 3, 0,
+            };
+
+            private GPUBuffer[] _vbs = new GPUBuffer[1];
+            private GPUBuffer _vertexBuffer;
+            private GPUBuffer _indexBuffer;
+            private GPUPipelineState _psGrid;
+            private Shader _shader;
 
             public Renderer()
             {
-                Order = -100;
                 UseSingleTarget = true;
-                Location = PostProcessEffectLocation.BeforeForwardPass;
+                Location = PostProcessEffectLocation.Default;
+                _shader = FlaxEngine.Content.LoadAsyncInternal<Shader>("Shaders/Editor/Grid");
             }
 
             ~Renderer()
             {
-                if (_debugDrawContext != IntPtr.Zero)
-                {
-                    DebugDraw.FreeContext(_debugDrawContext);
-                    _debugDrawContext = IntPtr.Zero;
-                }
+                Destroy(ref _psGrid);
+                Destroy(ref _vertexBuffer);
+                Destroy(ref _indexBuffer);
+                _shader = null;
             }
 
-            public override void Render(GPUContext context, ref RenderContext renderContext, GPUTexture input, GPUTexture output)
+            public override unsafe void Render(GPUContext context, ref RenderContext renderContext, GPUTexture input, GPUTexture output)
             {
+                if (_shader == null)
+                    return;
                 Profiler.BeginEventGPU("Editor Grid");
 
-                if (_debugDrawContext == IntPtr.Zero)
-                    _debugDrawContext = DebugDraw.AllocateContext();
-                DebugDraw.SetContext(_debugDrawContext);
-                DebugDraw.UpdateContext(_debugDrawContext, 1.0f / Mathf.Max(Engine.FramesPerSecond, 1));
+                var options = Editor.Instance.Options.Options;
+                Float3 camPos = renderContext.View.WorldPosition;
+                float gridSize = renderContext.View.Far + 20000;
 
-                var viewPos = (Vector3)renderContext.View.Position;
-                var plane = new Plane(Vector3.Zero, Vector3.UnitY);
-                var dst = CollisionsHelper.DistancePlanePoint(ref plane, ref viewPos);
-
-                float space = Editor.Instance.Options.Options.Viewport.ViewportGridScale, size;
-                if (dst <= 500.0f)
+                // Lazy-init resources
+                if (_vertexBuffer == null)
                 {
-                    size = 8000;
+                    _vertexBuffer = new GPUBuffer();
+                    var desc = GPUBufferDescription.Vertex(sizeof(Float3), 4);
+                    _vertexBuffer.Init(ref desc);
                 }
-                else if (dst <= 2000.0f)
+                if (_indexBuffer == null)
                 {
-                    space *= 2;
-                    size = 8000;
+                    _indexBuffer = new GPUBuffer();
+                    fixed (uint* ptr = _triangles)
+                    {
+                        var desc = GPUBufferDescription.Index(sizeof(uint), _triangles.Length, new IntPtr(ptr));
+                        _indexBuffer.Init(ref desc);
+                    }
                 }
-                else
+                if (_psGrid == null)
                 {
-                    space *= 20;
-                    size = 100000;
-                }
-
-                Color color = Color.Gray * 0.7f;
-                int count = (int)(size / space);
-
-                Vector3 start = new Vector3(0, 0, size * -0.5f);
-                Vector3 end = new Vector3(0, 0, size * 0.5f);
-
-                for (int i = 0; i <= count; i++)
-                {
-                    start.X = end.X = i * space + start.Z;
-                    DebugDraw.DrawLine(start, end, color);
+                    _psGrid = new GPUPipelineState();
+                    var desc = GPUPipelineState.Description.Default;
+                    desc.BlendMode = BlendingMode.AlphaBlend;
+                    desc.CullMode = CullMode.TwoSided;
+                    desc.VS = _shader.GPU.GetVS("VS_Grid");
+                    desc.PS = _shader.GPU.GetPS("PS_Grid");
+                    _psGrid.Init(ref desc);
                 }
 
-                start = new Vector3(size * -0.5f, 0, 0);
-                end = new Vector3(size * 0.5f, 0, 0);
-
-                for (int i = 0; i <= count; i++)
+                // Update vertices of the plane
+                // TODO: perf this operation in a Vertex Shader
+                float y = 1.5f; // Add small bias to reduce Z-fighting with geometry at scene origin
+                var vertices = new Float3[]
                 {
-                    start.Z = end.Z = i * space + start.X;
-                    DebugDraw.DrawLine(start, end, color);
+                    new Float3(-gridSize + camPos.X, y, -gridSize + camPos.Z),
+                    new Float3(gridSize + camPos.X, y, gridSize + camPos.Z),
+                    new Float3(-gridSize + camPos.X, y, gridSize + camPos.Z),
+                    new Float3(gridSize + camPos.X, y, -gridSize + camPos.Z),
+                };
+                fixed (Float3* ptr = vertices)
+                {
+                    context.UpdateBuffer(_vertexBuffer, new IntPtr(ptr), (uint)(sizeof(Float3) * vertices.Length));
                 }
 
-                DebugDraw.Draw(ref renderContext, input.View(), null, true);
-                DebugDraw.SetContext(IntPtr.Zero);
+                // Update constant buffer data
+                var cb = _shader.GPU.GetCB(0);
+                if (cb != IntPtr.Zero)
+                {
+                    var data = new Data();
+                    Matrix.Multiply(ref renderContext.View.View, ref renderContext.View.Projection, out var viewProjection);
+                    data.WorldMatrix = Matrix.Identity;
+                    Matrix.Transpose(ref viewProjection, out data.ViewProjectionMatrix);
+                    data.ViewPos = renderContext.View.WorldPosition;
+                    data.GridColor = options.Viewport.ViewportGridColor;
+                    data.Far = renderContext.View.Far;
+                    data.GridSize = options.Viewport.ViewportGridViewDistance;
+                    context.UpdateCB(cb, new IntPtr(&data));
+                }
+
+                // Draw geometry using custom Pixel Shader and Vertex Shader
+                context.BindCB(0, cb);
+                context.BindIB(_indexBuffer);
+                _vbs[0] = _vertexBuffer;
+                context.BindVB(_vbs);
+                context.SetState(_psGrid);
+                context.SetRenderTarget(renderContext.Buffers.DepthBuffer.View(), input.View());
+                context.DrawIndexed((uint)_triangles.Length);
 
                 Profiler.EndEventGPU();
             }

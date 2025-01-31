@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -70,6 +70,7 @@ public:
 
     // [ISkyRenderer]
     bool IsDynamicSky() const override;
+    float GetIndirectLightingIntensity() const override;
     void ApplySky(GPUContext* context, RenderContext& renderContext, const Matrix& world) override;
 
 protected:

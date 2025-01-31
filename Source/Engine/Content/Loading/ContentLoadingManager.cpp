@@ -1,9 +1,10 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "ContentLoadingManager.h"
 #include "ContentLoadTask.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Math/Math.h"
+#include "Engine/Core/Collections/Array.h"
 #include "Engine/Platform/CPUInfo.h"
 #include "Engine/Platform/Thread.h"
 #include "Engine/Platform/ConditionVariable.h"
@@ -163,7 +164,7 @@ bool ContentLoadingManagerService::Init()
 
     // Calculate amount of loading threads to use
     const CPUInfo cpuInfo = Platform::GetCPUInfo();
-    const int32 count = Math::Clamp(static_cast<int32>(LOADING_THREAD_PER_LOGICAL_CORE * (float)cpuInfo.LogicalProcessorCount), 1, 12);
+    const int32 count = Math::Clamp(Math::CeilToInt(LOADING_THREAD_PER_LOGICAL_CORE * (float)cpuInfo.LogicalProcessorCount), 1, 12);
     LOG(Info, "Creating {0} content loading threads...", count);
 
     // Create loading threads
@@ -212,7 +213,7 @@ void ContentLoadingManagerService::Dispose()
 
 String ContentLoadTask::ToString() const
 {
-    return String::Format(TEXT("Content Load Task {0} ({1})"), ToString(GetType()), (int32)GetState());
+    return String::Format(TEXT("Content Load Task ({})"), (int32)GetState());
 }
 
 void ContentLoadTask::Enqueue()

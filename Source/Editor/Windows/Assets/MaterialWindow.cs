@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -54,76 +54,76 @@ namespace FlaxEditor.Windows.Assets
             [EditorOrder(10), EditorDisplay("General"), Tooltip("Material domain type.")]
             public MaterialDomain Domain;
 
-            [EditorOrder(20), EditorDisplay("General"), Tooltip("Defines how material inputs and properties are combined to result the final surface color.")]
+            [EditorOrder(20), VisibleIf(nameof(IsStandard)), EditorDisplay("General"), Tooltip("Defines how material inputs and properties are combined to result the final surface color.")]
             public MaterialShadingModel ShadingModel;
 
-            [EditorOrder(30), EditorDisplay("General"), Tooltip("Determinates how materials' color should be blended with the background colors.")]
+            [EditorOrder(30), VisibleIf(nameof(IsStandard)), EditorDisplay("General"), Tooltip("Determinates how materials' color should be blended with the background colors.")]
             public MaterialBlendMode BlendMode;
 
             // Rendering
 
-            [EditorOrder(100), DefaultValue(CullMode.Normal), EditorDisplay("Rendering"), Tooltip("Defines the primitives culling mode used during geometry rendering.")]
+            [EditorOrder(100), DefaultValue(CullMode.Normal), VisibleIf(nameof(IsStandard)), EditorDisplay("Rendering"), Tooltip("Defines the primitives culling mode used during geometry rendering.")]
             public CullMode CullMode;
 
-            [EditorOrder(110), DefaultValue(false), EditorDisplay("Rendering"), Tooltip("If checked, geometry will be rendered in wireframe mode without solid triangles fill.")]
+            [EditorOrder(110), DefaultValue(false), VisibleIf(nameof(IsStandardOrGUI)), EditorDisplay("Rendering"), Tooltip("If checked, geometry will be rendered in wireframe mode without solid triangles fill.")]
             public bool Wireframe;
 
-            [EditorOrder(120), DefaultValue(true), EditorDisplay("Rendering"), Tooltip("Enables performing depth test during material rendering.")]
+            [EditorOrder(120), DefaultValue(true), VisibleIf(nameof(IsStandard)), EditorDisplay("Rendering"), Tooltip("Enables performing depth test during material rendering.")]
             public bool DepthTest;
 
-            [EditorOrder(130), DefaultValue(true), EditorDisplay("Rendering"), Tooltip("Enable writing to the depth buffer during material rendering.")]
+            [EditorOrder(130), DefaultValue(true), VisibleIf(nameof(IsStandard)), EditorDisplay("Rendering"), Tooltip("Enable writing to the depth buffer during material rendering.")]
             public bool DepthWrite;
 
             // Transparency
 
-            [EditorOrder(200), DefaultValue(MaterialTransparentLightingMode.Surface), EditorDisplay("Transparency"), Tooltip("Transparent material lighting mode.")]
+            [EditorOrder(200), DefaultValue(MaterialTransparentLightingMode.Surface), VisibleIf(nameof(IsStandard)), EditorDisplay("Transparency"), Tooltip("Transparent material lighting mode.")]
             public MaterialTransparentLightingMode TransparentLightingMode;
 
-            [EditorOrder(205), DefaultValue(true), EditorDisplay("Transparency"), Tooltip("Enables reflections when rendering material.")]
+            [EditorOrder(205), DefaultValue(true), VisibleIf(nameof(IsStandard)), EditorDisplay("Transparency"), Tooltip("Enables reflections when rendering material.")]
             public bool EnableReflections;
 
             [VisibleIf(nameof(EnableReflections))]
-            [EditorOrder(210), DefaultValue(false), EditorDisplay("Transparency"), Tooltip("Enables Screen Space Reflections when rendering material.")]
+            [EditorOrder(210), DefaultValue(false), VisibleIf(nameof(IsStandard)), EditorDisplay("Transparency"), Tooltip("Enables Screen Space Reflections when rendering material.")]
             public bool EnableScreenSpaceReflections;
 
-            [EditorOrder(210), DefaultValue(true), EditorDisplay("Transparency"), Tooltip("Enables fog effects when rendering material.")]
+            [EditorOrder(210), DefaultValue(true), VisibleIf(nameof(IsStandard)), EditorDisplay("Transparency"), Tooltip("Enables fog effects when rendering material.")]
             public bool EnableFog;
 
-            [EditorOrder(220), DefaultValue(true), EditorDisplay("Transparency"), Tooltip("Enables distortion effect when rendering.")]
+            [EditorOrder(220), DefaultValue(true), VisibleIf(nameof(IsStandard)), EditorDisplay("Transparency"), Tooltip("Enables distortion effect when rendering.")]
             public bool EnableDistortion;
 
-            [EditorOrder(224), DefaultValue(false), EditorDisplay("Transparency"), Tooltip("Enables sampling Global Illumination in material (eg. light probes or volumetric lightmap).")]
+            [EditorOrder(224), DefaultValue(false), VisibleIf(nameof(IsStandard)), EditorDisplay("Transparency"), Tooltip("Enables sampling Global Illumination in material (eg. light probes or volumetric lightmap).")]
             public bool EnableGlobalIllumination;
 
-            [EditorOrder(225), DefaultValue(false), EditorDisplay("Transparency"), Tooltip("Enables refraction offset based on the difference between the per-pixel normal and the per-vertex normal. Useful for large water-like surfaces.")]
+            [EditorOrder(225), DefaultValue(false), VisibleIf(nameof(IsStandard)), EditorDisplay("Transparency"), Tooltip("Enables refraction offset based on the difference between the per-pixel normal and the per-vertex normal. Useful for large water-like surfaces.")]
             public bool PixelNormalOffsetRefraction;
 
-            [EditorOrder(230), DefaultValue(0.12f), EditorDisplay("Transparency"), Tooltip("Controls opacity values clipping point."), Limit(0.0f, 1.0f, 0.01f)]
+            [EditorOrder(230), DefaultValue(0.12f), VisibleIf(nameof(IsStandard)), EditorDisplay("Transparency"), Tooltip("Controls opacity values clipping point."), Limit(0.0f, 1.0f, 0.01f)]
             public float OpacityThreshold;
 
             // Tessellation
 
-            [EditorOrder(300), DefaultValue(TessellationMethod.None), EditorDisplay("Tessellation"), Tooltip("Mesh tessellation method.")]
+            [EditorOrder(300), DefaultValue(TessellationMethod.None), VisibleIf(nameof(IsStandard)), EditorDisplay("Tessellation"), Tooltip("Mesh tessellation method.")]
             public TessellationMethod TessellationMode;
 
-            [EditorOrder(310), DefaultValue(15), EditorDisplay("Tessellation"), Tooltip("Maximum triangle tessellation factor."), Limit(1, 60, 0.01f)]
+            [EditorOrder(310), DefaultValue(15), VisibleIf(nameof(IsStandard)), EditorDisplay("Tessellation"), Tooltip("Maximum triangle tessellation factor."), Limit(1, 60, 0.01f)]
             public int MaxTessellationFactor;
 
             // Misc
 
-            [EditorOrder(400), DefaultValue(false), EditorDisplay("Misc"), Tooltip("If checked, material input normal will be assumed as world-space rather than tangent-space.")]
+            [EditorOrder(400), DefaultValue(false), VisibleIf(nameof(IsStandard)), EditorDisplay("Misc"), Tooltip("If checked, material input normal will be assumed as world-space rather than tangent-space.")]
             public bool InputWorldSpaceNormal;
 
-            [EditorOrder(410), DefaultValue(false), EditorDisplay("Misc", "Dithered LOD Transition"), Tooltip("If checked, material uses dithered model LOD transition for smoother LODs switching.")]
+            [EditorOrder(410), DefaultValue(false), VisibleIf(nameof(IsStandard)), EditorDisplay("Misc", "Dithered LOD Transition"), Tooltip("If checked, material uses dithered model LOD transition for smoother LODs switching.")]
             public bool DitheredLODTransition;
 
-            [EditorOrder(420), DefaultValue(0.3f), EditorDisplay("Misc"), Tooltip("Controls mask values clipping point."), Limit(0.0f, 1.0f, 0.01f)]
+            [EditorOrder(420), DefaultValue(0.3f), VisibleIf(nameof(IsStandard)), EditorDisplay("Misc"), Tooltip("Controls mask values clipping point."), Limit(0.0f, 1.0f, 0.01f)]
             public float MaskThreshold;
 
-            [EditorOrder(430), DefaultValue(MaterialDecalBlendingMode.Translucent), EditorDisplay("Misc"), Tooltip("The decal material blending mode.")]
+            [EditorOrder(430), DefaultValue(MaterialDecalBlendingMode.Translucent), VisibleIf(nameof(IsDecal)), EditorDisplay("Misc"), Tooltip("The decal material blending mode.")]
             public MaterialDecalBlendingMode DecalBlendingMode;
 
-            [EditorOrder(440), DefaultValue(MaterialPostFxLocation.AfterPostProcessingPass), EditorDisplay("Misc"), Tooltip("The post fx material rendering location.")]
+            [EditorOrder(440), DefaultValue(MaterialPostFxLocation.AfterPostProcessingPass), VisibleIf(nameof(IsPostProcess)), EditorDisplay("Misc"), Tooltip("The post fx material rendering location.")]
             public MaterialPostFxLocation PostFxLocation;
 
             // Parameters
@@ -139,6 +139,14 @@ namespace FlaxEditor.Windows.Assets
                 get => Window.Surface.Parameters;
                 set => throw new Exception("No setter.");
             }
+
+            // Visibility conditionals
+
+            private bool IsPostProcess => Domain == MaterialDomain.PostProcess;
+            private bool IsDecal => Domain == MaterialDomain.Decal;
+            private bool IsGUI => Domain == MaterialDomain.GUI;
+            private bool IsStandard => Domain == MaterialDomain.Surface || Domain == MaterialDomain.Terrain || Domain == MaterialDomain.Particle || Domain == MaterialDomain.Deformable;
+            private bool IsStandardOrGUI => IsStandard || IsGUI;
 
             /// <summary>
             /// Gathers parameters from the specified material.
@@ -251,8 +259,9 @@ namespace FlaxEditor.Windows.Assets
             };
 
             // Toolstrip
-            _toolstrip.AddSeparator();
+            SurfaceUtils.PerformCommonSetup(this, _toolstrip, _surface, out _saveButton, out _undoButton, out _redoButton);
             _toolstrip.AddButton(editor.Icons.Code64, ShowSourceCode).LinkTooltip("Show generated shader source code");
+            _toolstrip.AddSeparator();
             _toolstrip.AddButton(editor.Icons.Docs64, () => Platform.OpenUrl(Utilities.Constants.DocsUrl + "manual/graphics/materials/index.html")).LinkTooltip("See documentation to learn more");
         }
 

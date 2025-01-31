@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "CharacterController.h"
 #include "Engine/Physics/Colliders/Collider.h"
@@ -19,6 +19,7 @@ CharacterController::CharacterController(const SpawnParams& params)
     , _minMoveDistance(0.0f)
     , _isUpdatingTransform(false)
     , _upDirection(Vector3::Up)
+    , _gravityDisplacement(Vector3::Zero)
     , _nonWalkableMode(NonWalkableModes::PreventClimbing)
     , _lastFlags(CollisionFlags::None)
 {
@@ -148,10 +149,16 @@ CharacterController::CollisionFlags CharacterController::GetFlags() const
 CharacterController::CollisionFlags CharacterController::SimpleMove(const Vector3& speed)
 {
     const float deltaTime = Time::GetCurrentSafe()->DeltaTime.GetTotalSeconds();
-    Vector3 displacement = speed;
-    displacement += GetPhysicsScene()->GetGravity() * deltaTime;
-    displacement *= deltaTime;
-    return Move(displacement);
+    Vector3 displacement = speed + _gravityDisplacement;
+    CollisionFlags result = Move(displacement * deltaTime);
+    if ((static_cast<int>(result) & static_cast<int>(CollisionFlags::Below)) != 0)
+    {
+        // Reset accumulated gravity acceleration when we touch the ground
+        _gravityDisplacement = Vector3::Zero;
+    }
+    else
+        _gravityDisplacement += GetPhysicsScene()->GetGravity() * deltaTime;
+    return result;
 }
 
 CharacterController::CollisionFlags CharacterController::Move(const Vector3& displacement)
@@ -206,11 +213,11 @@ void CharacterController::CreateController()
     _cachedScale = GetScale();
     const float scaling = _cachedScale.GetAbsolute().MaxValue();
     const Vector3 position = _transform.LocalToWorld(_center);
-    _controller = PhysicsBackend::CreateController(GetPhysicsScene()->GetPhysicsScene(), this, this, _contactOffset, position, _slopeLimit, (int32)_nonWalkableMode, Material.Get(), Math::Abs(_radius) * scaling, Math::Abs(_height) * scaling, _stepOffset, _shape);
+    _controller = PhysicsBackend::CreateController(GetPhysicsScene()->GetPhysicsScene(), this, this, _contactOffset, position, _slopeLimit, (int32)_nonWalkableMode, Material, Math::Abs(_radius) * scaling, Math::Abs(_height) * scaling, _stepOffset, _shape);
 
     // Setup
     PhysicsBackend::SetControllerUpDirection(_controller, _upDirection);
-    PhysicsBackend::SetShapeLocalPose(_shape, _center, Quaternion::Identity);
+    PhysicsBackend::SetShapeLocalPose(_shape, Vector3::Zero, Quaternion::Identity);
     UpdateLayerBits();
     UpdateBounds();
 }
@@ -280,12 +287,8 @@ void CharacterController::OnActiveTransformChanged()
     // Change actor transform (but with locking)
     ASSERT(!_isUpdatingTransform);
     _isUpdatingTransform = true;
-    Transform transform;
-    PhysicsBackend::GetRigidActorPose(PhysicsBackend::GetShapeActor(_shape), transform.Translation, transform.Orientation);
-    transform.Translation -= _center;
-    transform.Orientation = _transform.Orientation;
-    transform.Scale = _transform.Scale;
-    SetTransform(transform);
+    const Vector3 position = PhysicsBackend::GetControllerPosition(_controller) - _center;
+    SetPosition(position);
     _isUpdatingTransform = false;
 
     UpdateBounds();

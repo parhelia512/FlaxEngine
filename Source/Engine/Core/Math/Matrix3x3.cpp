@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Matrix3x3.h"
 #include "Matrix.h"
@@ -21,6 +21,11 @@ Matrix3x3::Matrix3x3(const Matrix& matrix)
 String Matrix3x3::ToString() const
 {
     return String::Format(TEXT("{}"), *this);
+}
+
+float Matrix3x3::GetDeterminant() const
+{
+    return M11 * M22 * M33 + M12 * M23 * M31 + M13 * M21 * M32 - M13 * M22 * M31 - M12 * M21 * M33 - M11 * M23 * M32;
 }
 
 void Matrix3x3::NormalizeScale()
@@ -220,7 +225,7 @@ void Matrix3x3::Decompose(Float3& scale, Matrix3x3& rotation) const
     const auto right = Float3::Cross(up, at);
     rotation.SetRight(right);
     rotation.SetUp(up);
-    rotation.SetBackward(at);
+    rotation.SetForward(at);
 
     // In case of reflexions
     scale.X = Float3::Dot(right, GetRight()) > 0.0f ? scale.X : -scale.X;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -167,6 +167,12 @@ namespace FlaxEditor.Scripting
         /// <param name="bindingAttr">A bitmask comprised of one or more <see cref="T:System.Reflection.BindingFlags" /> that specify how the search is conducted.-or- Zero (<see cref="F:System.Reflection.BindingFlags.Default" />), to return an empty array.</param>
         /// <returns>An array of member objects representing all methods defined for the current type that match the specified binding constraints.-or- An empty array of type member, if no methods are defined for the current type, or if none of the defined methods match the binding constraints.</returns>
         ScriptMemberInfo[] GetMethods(BindingFlags bindingAttr);
+
+        /// <summary>
+        /// Registers delegate to be invoked upon script type disposal (except hot-reload in Editor via <see cref="ScriptsBuilder.ScriptsReload"/>). For example, can happen when user deleted Visual Script asset.
+        /// </summary>
+        /// <param name="disposing">Event to call when script type gets disposed (eg. removed asset).</param>
+        void TrackLifetime(Action<ScriptType> disposing);
     }
 
     /// <summary>
@@ -287,6 +293,14 @@ namespace FlaxEditor.Scripting
         /// <param name="obj">The object whose member value will be modified.</param>
         /// <param name="value">The new member value.</param>
         void SetValue(object obj, object value);
+
+        /// <summary>
+        /// Invokes the method on a specific object (null if static) using the provided parameters.
+        /// </summary>
+        /// <param name="obj">The instance of the object to invoke its method. Use null for static methods.</param>
+        /// <param name="parameters">List of parameters to provide.</param>
+        /// <returns>The value returned by the method.</returns>
+        object Invoke(object obj, object[] parameters);
     }
 
     /// <summary>

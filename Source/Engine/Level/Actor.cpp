@@ -1,8 +1,9 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Actor.h"
 #include "ActorsCache.h"
 #include "Level.h"
+#include "SceneQuery.h"
 #include "SceneObjectsFactory.h"
 #include "Scene/Scene.h"
 #include "Prefabs/Prefab.h"
@@ -319,13 +320,9 @@ void Actor::SetParent(Actor* value, bool worldPositionsStays, bool canBreakPrefa
     if (worldPositionsStays)
     {
         if (_parent)
-        {
-            _parent->GetTransform().WorldToLocal(prevTransform, _localTransform);
-        }
+            _parent->_transform.WorldToLocal(prevTransform, _localTransform);
         else
-        {
             _localTransform = prevTransform;
-        }
     }
 
     // Fire events
@@ -547,6 +544,15 @@ void Actor::SetLayerRecursive(int32 layerIndex)
     OnLayerChanged();
 }
 
+void Actor::SetName(String&& value)
+{
+    if (_name == value)
+        return;
+    _name = MoveTemp(value);
+    if (GetScene())
+        Level::callActorEvent(Level::ActorEventType::OnActorNameChanged, this, nullptr);
+}
+
 void Actor::SetName(const StringView& value)
 {
     if (_name == value)
@@ -613,7 +619,10 @@ void Actor::SetIsActive(bool value)
 
 void Actor::SetStaticFlags(StaticFlags value)
 {
+    if (_staticFlags == value)
+        return;
     _staticFlags = value;
+    OnStaticFlagsChanged();
 }
 
 void Actor::SetTransform(const Transform& value)
@@ -622,7 +631,7 @@ void Actor::SetTransform(const Transform& value)
     if (!(Vector3::NearEqual(_transform.Translation, value.Translation) && Quaternion::NearEqual(_transform.Orientation, value.Orientation, ACTOR_ORIENTATION_EPSILON) && Float3::NearEqual(_transform.Scale, value.Scale)))
     {
         if (_parent)
-            _parent->GetTransform().WorldToLocal(value, _localTransform);
+            _parent->_transform.WorldToLocal(value, _localTransform);
         else
             _localTransform = value;
         OnTransformChanged();
@@ -635,7 +644,7 @@ void Actor::SetPosition(const Vector3& value)
     if (!Vector3::NearEqual(_transform.Translation, value))
     {
         if (_parent)
-            _localTransform.Translation = _parent->GetTransform().WorldToLocal(value);
+            _localTransform.Translation = _parent->_transform.WorldToLocal(value);
         else
             _localTransform.Translation = value;
         OnTransformChanged();
@@ -648,16 +657,9 @@ void Actor::SetOrientation(const Quaternion& value)
     if (!Quaternion::NearEqual(_transform.Orientation, value, ACTOR_ORIENTATION_EPSILON))
     {
         if (_parent)
-        {
-            _localTransform.Orientation = _parent->GetOrientation();
-            _localTransform.Orientation.Invert();
-            Quaternion::Multiply(_localTransform.Orientation, value, _localTransform.Orientation);
-            _localTransform.Orientation.Normalize();
-        }
+            _parent->_transform.WorldToLocal(value, _localTransform.Orientation);
         else
-        {
             _localTransform.Orientation = value;
-        }
         OnTransformChanged();
     }
 }
@@ -668,7 +670,7 @@ void Actor::SetScale(const Float3& value)
     if (!Float3::NearEqual(_transform.Scale, value))
     {
         if (_parent)
-            Float3::Divide(value, _parent->GetScale(), _localTransform.Scale);
+            Float3::Divide(value, _parent->_transform.Scale, _localTransform.Scale);
         else
             _localTransform.Scale = value;
         OnTransformChanged();
@@ -764,8 +766,23 @@ void Actor::AddMovement(const Vector3& translation, const Quaternion& rotation)
 
 void Actor::GetWorldToLocalMatrix(Matrix& worldToLocal) const
 {
-    _transform.GetWorld(worldToLocal);
+    GetLocalToWorldMatrix(worldToLocal);
     worldToLocal.Invert();
+}
+
+void Actor::GetLocalToWorldMatrix(Matrix& localToWorld) const
+{
+#if 0
+    _transform.GetWorld(localToWorld);
+#else
+    _localTransform.GetWorld(localToWorld);
+    if (_parent)
+    {
+        Matrix parentToWorld;
+        _parent->GetLocalToWorldMatrix(parentToWorld);
+        localToWorld = localToWorld * parentToWorld;
+    }
+#endif
 }
 
 void Actor::LinkPrefab(const Guid& prefabId, const Guid& prefabObjectId)
@@ -930,7 +947,7 @@ void Actor::EndPlay()
     }
 
     // Cleanup managed object
-    DestroyManaged();
+    //DestroyManaged();
     if (IsRegistered())
         UnregisterObject();
 }
@@ -1058,9 +1075,12 @@ void Actor::Deserialize(DeserializeStream& stream, ISerializeModifier* modifier)
     // StaticFlags update - added StaticFlags::Navigation
     // [Deprecated on 17.05.2020, expires on 17.05.2021]
     if (modifier->EngineBuild < 6178 && (int32)_staticFlags == (1 + 2 + 4))
-    {
         _staticFlags |= StaticFlags::Navigation;
-    }
+
+    // StaticFlags update - added StaticFlags::Shadow
+    // [Deprecated on 17.05.2020, expires on 17.05.2021]
+    if (modifier->EngineBuild < 6601 && (int32)_staticFlags == (1 + 2 + 4 + 8))
+        _staticFlags |= StaticFlags::Shadow;
 
     const auto tag = stream.FindMember("Tag");
     if (tag != stream.MemberEnd())
@@ -1222,6 +1242,14 @@ void Actor::OnOrderInParentChanged()
     Level::callActorEvent(Level::ActorEventType::OnActorOrderInParentChanged, this, nullptr);
 }
 
+void Actor::OnStaticFlagsChanged()
+{
+}
+
+void Actor::OnLayerChanged()
+{
+}
+
 BoundingBox Actor::GetBoxWithChildren() const
 {
     BoundingBox result = GetBox();
@@ -1356,6 +1384,16 @@ bool Actor::IsPrefabRoot() const
     return _isPrefabRoot != 0;
 }
 
+Actor* Actor::GetPrefabRoot()
+{
+    if (!HasPrefabLink())
+        return nullptr;
+    Actor* result = this;
+    while (result && !result->IsPrefabRoot())
+        result = result->GetParent();
+    return result;
+}
+
 Actor* Actor::FindActor(const StringView& name) const
 {
     Actor* result = nullptr;
@@ -1376,14 +1414,16 @@ Actor* Actor::FindActor(const StringView& name) const
     return result;
 }
 
-Actor* Actor::FindActor(const MClass* type) const
+Actor* Actor::FindActor(const MClass* type, bool activeOnly) const
 {
     CHECK_RETURN(type, nullptr);
+    if (activeOnly && !_isActive)
+        return nullptr;
     if (GetClass()->IsSubClassOf(type))
         return const_cast<Actor*>(this);
     for (auto child : Children)
     {
-        const auto actor = child->FindActor(type);
+        const auto actor = child->FindActor(type, activeOnly);
         if (actor)
             return actor;
     }
@@ -1404,14 +1444,16 @@ Actor* Actor::FindActor(const MClass* type, const StringView& name) const
     return nullptr;
 }
 
-Actor* Actor::FindActor(const MClass* type, const Tag& tag) const
+Actor* Actor::FindActor(const MClass* type, const Tag& tag, bool activeOnly) const
 {
     CHECK_RETURN(type, nullptr);
+    if (activeOnly && !_isActive)
+        return nullptr;
     if (GetClass()->IsSubClassOf(type) && HasTag(tag))
         return const_cast<Actor*>(this);
     for (auto child : Children)
     {
-        const auto actor = child->FindActor(type, tag);
+        const auto actor = child->FindActor(type, tag, activeOnly);
         if (actor)
             return actor;
     }
@@ -1746,14 +1788,6 @@ bool Actor::FromBytes(const Span<byte>& data, Array<Actor*>& output, ISerializeM
     }
     Scripting::ObjectsLookupIdMapping.Set(nullptr);
 
-    // Link objects
-    //for (int32 i = 0; i < objectsCount; i++)
-    {
-        //SceneObject* obj = sceneObjects->At(i);
-        // TODO: post load or post spawn?
-        //obj->PostLoad();
-    }
-
     // Update objects order
     //for (int32 i = 0; i < objectsCount; i++)
     {
@@ -1847,8 +1881,7 @@ String Actor::ToJson()
     CompactJsonWriter writer(buffer);
     writer.SceneObject(this);
     String result;
-    const char* c = buffer.GetString();
-    result.SetUTF8(c, (int32)buffer.GetSize());
+    result.SetUTF8(buffer.GetString(), (int32)buffer.GetSize());
     return result;
 }
 
@@ -1874,6 +1907,41 @@ void Actor::FromJson(const StringAnsiView& json)
     Deserialize(document, &*modifier);
     Scripting::ObjectsLookupIdMapping.Set(nullptr);
     OnTransformChanged();
+}
+
+Actor* Actor::Clone()
+{
+    // Collect actors to clone
+    auto actors = ActorsCache::ActorsListCache.Get();
+    actors->Add(this);
+    SceneQuery::GetAllActors(this, *actors);
+
+    // Serialize objects
+    MemoryWriteStream stream;
+    if (ToBytes(*actors, stream))
+        return nullptr;
+
+    // Remap object ids into a new ones
+    auto modifier = Cache::ISerializeModifier.Get();
+    for (int32 i = 0; i < actors->Count(); i++)
+    {
+        auto actor = actors->At(i);
+        if (!actor)
+            continue;
+        modifier->IdsMapping.Add(actor->GetID(), Guid::New());
+        for (int32 j = 0; j < actor->Scripts.Count(); j++)
+        {
+            const auto script = actor->Scripts[j];
+            if (script)
+                modifier->IdsMapping.Add(script->GetID(), Guid::New());
+        }
+    }
+
+    // Deserialize objects
+    Array<Actor*> output;
+    if (FromBytes(ToSpan(stream.GetHandle(), (int32)stream.GetPosition()), output, modifier.Value) || output.IsEmpty())
+        return nullptr;
+    return output[0];
 }
 
 void Actor::SetPhysicsScene(PhysicsScene* scene)

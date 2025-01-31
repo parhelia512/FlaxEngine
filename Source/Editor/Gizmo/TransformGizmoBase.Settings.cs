@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEngine;
@@ -20,7 +20,7 @@ namespace FlaxEditor.Gizmo
         /// <summary>
         /// Offset to move axis away from center
         /// </summary>
-        private const float AxisOffset = 0.8f;
+        private const float AxisOffset = 1.2f;
 
         /// <summary>
         /// How thick the axis should be

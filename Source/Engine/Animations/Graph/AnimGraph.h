@@ -1,10 +1,11 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
 #include "Engine/Visject/VisjectGraph.h"
 #include "Engine/Content/Assets/Animation.h"
 #include "Engine/Core/Collections/ChunkedArray.h"
+#include "Engine/Core/Collections/BitArray.h"
 #include "Engine/Animations/AlphaBlend.h"
 #include "Engine/Core/Math/Matrix.h"
 #include "../Config.h"
@@ -12,9 +13,8 @@
 #define ANIM_GRAPH_PARAM_BASE_MODEL_ID Guid(1000, 0, 0, 0)
 
 #define ANIM_GRAPH_IS_VALID_PTR(value) (value.Type.Type == VariantType::Pointer && value.AsPointer != nullptr)
-#define ANIM_GRAPH_MULTI_BLEND_MAX_ANIMS 14
-#define ANIM_GRAPH_MULTI_BLEND_2D_MAX_TRIS 32
-#define ANIM_GRAPH_MAX_STATE_TRANSITIONS 64
+#define ANIM_GRAPH_MULTI_BLEND_INDEX byte
+#define ANIM_GRAPH_MULTI_BLEND_INVALID 0xff
 #define ANIM_GRAPH_MAX_CALL_STACK 100
 #define ANIM_GRAPH_MAX_EVENTS 64
 
@@ -92,9 +92,9 @@ enum class BoneTransformMode
 };
 
 /// <summary>
-/// The animated model root motion mode.
+/// The animated model root motion extraction modes.
 /// </summary>
-enum class RootMotionMode
+enum class RootMotionExtraction
 {
     /// <summary>
     /// Don't extract nor apply the root motion.
@@ -205,7 +205,7 @@ struct FLAXENGINE_API AnimGraphSlot
 /// <summary>
 /// The animation graph state container for a single node playback trace (eg. animation sample info or state transition). Can be used by Anim Graph debugging or custom scripting.
 /// </summary>
-API_STRUCT() struct FLAXENGINE_API AnimGraphTraceEvent
+API_STRUCT(NoDefault) struct FLAXENGINE_API AnimGraphTraceEvent
 {
     DECLARE_SCRIPTING_TYPE_MINIMAL(AnimGraphTraceEvent);
 
@@ -215,6 +215,8 @@ API_STRUCT() struct FLAXENGINE_API AnimGraphTraceEvent
     API_FIELD() float Value = 0;
     // Identifier of the node in the graph.
     API_FIELD() uint32 NodeId = 0;
+    // Ids of graph nodes (call of hierarchy).
+    API_FIELD(Internal, NoArray) uint32 NodePath[8] = {};
 };
 
 /// <summary>
@@ -424,61 +426,31 @@ struct AnimGraphTransitionData
     float Length;
 };
 
-class AnimGraphBox : public VisjectGraphBox
-{
-public:
-    AnimGraphBox()
-    {
-    }
-
-    AnimGraphBox(AnimGraphNode* parent, byte id, const VariantType::Types type)
-        : VisjectGraphBox(parent, id, type)
-    {
-    }
-
-    AnimGraphBox(AnimGraphNode* parent, byte id, const VariantType& type)
-        : VisjectGraphBox(parent, id, type)
-    {
-    }
-};
+typedef VisjectGraphBox AnimGraphBox;
 
 class AnimGraphNode : public VisjectGraphNode<AnimGraphBox>
 {
 public:
     struct MultiBlend1DData
     {
-        /// <summary>
-        /// The computed length of the mixes animations. Shared for all blend points to provide more stabilization during looped playback.
-        /// </summary>
+        // Amount of blend points.
+        ANIM_GRAPH_MULTI_BLEND_INDEX Count;
+        // The computed length of the mixes animations. Shared for all blend points to provide more stabilization during looped playback.
         float Length;
-
-        /// <summary>
-        /// The indices of the animations to blend. Sorted from the lowest X to the highest X. Contains only valid used animations. Unused items are using index ANIM_GRAPH_MULTI_BLEND_MAX_ANIMS which is invalid.
-        /// </summary>
-        byte IndicesSorted[ANIM_GRAPH_MULTI_BLEND_MAX_ANIMS];
+        // The indices of the animations to blend. Sorted from the lowest X to the highest X. Contains only valid used animations. Unused items are using index ANIM_GRAPH_MULTI_BLEND_INVALID which is invalid.
+        ANIM_GRAPH_MULTI_BLEND_INDEX* IndicesSorted;
     };
 
     struct MultiBlend2DData
     {
-        /// <summary>
-        /// The computed length of the mixes animations. Shared for all blend points to provide more stabilization during looped playback.
-        /// </summary>
+        // Amount of blend points.
+        ANIM_GRAPH_MULTI_BLEND_INDEX Count;
+        // The computed length of the mixes animations. Shared for all blend points to provide more stabilization during looped playback.
         float Length;
-
-        /// <summary>
-        /// Cached triangles vertices (vertex 0). Contains list of indices for triangles to use for blending.
-        /// </summary>
-        byte TrianglesP0[ANIM_GRAPH_MULTI_BLEND_2D_MAX_TRIS];
-
-        /// <summary>
-        /// Cached triangles vertices (vertex 1). Contains list of indices for triangles to use for blending.
-        /// </summary>
-        byte TrianglesP1[ANIM_GRAPH_MULTI_BLEND_2D_MAX_TRIS];
-
-        /// <summary>
-        /// Cached triangles vertices (vertex 2). Contains list of indices for triangles to use for blending.
-        /// </summary>
-        byte TrianglesP2[ANIM_GRAPH_MULTI_BLEND_2D_MAX_TRIS];
+        // Amount of triangles.
+        int32 TrianglesCount;
+        // Cached triangles vertices (3 bytes per triangle). Contains list of indices for triangles to use for blending.
+        ANIM_GRAPH_MULTI_BLEND_INDEX* Triangles;
     };
 
     struct StateMachineData
@@ -491,15 +463,11 @@ public:
 
     struct StateBaseData
     {
-        /// <summary>
-        /// The invalid transition valid used in Transitions to indicate invalid transition linkage.
-        /// </summary>
+        // The invalid transition valid used in Transitions to indicate invalid transition linkage.
         const static uint16 InvalidTransitionIndex = MAX_uint16;
 
-        /// <summary>
-        /// The outgoing transitions from this state to the other states. Each array item contains index of the transition data from the state node graph transitions cache. Value InvalidTransitionIndex is used for last transition to indicate the transitions amount.
-        /// </summary>
-        uint16 Transitions[ANIM_GRAPH_MAX_STATE_TRANSITIONS];
+        // The outgoing transitions from this state to the other states. Each array item contains index of the transition data from the state node graph transitions cache. Value InvalidTransitionIndex is used for last transition to indicate the transitions amount.
+        uint16* Transitions;
     };
 
     struct StateData : StateBaseData
@@ -595,12 +563,14 @@ public:
     {
     }
 
+    ~AnimGraphNode();
+
 public:
     /// <summary>
     /// Gets the per-node node transformations cache (cached).
     /// </summary>
     /// <param name="executor">The Graph execution context.</param>
-    /// <returns>The modes data.</returns>
+    /// <returns>Nodes data.</returns>
     AnimGraphImpulse* GetNodes(AnimGraphExecutor* executor);
 };
 
@@ -794,12 +764,16 @@ struct AnimGraphContext
     AnimGraphInstanceData* Data;
     AnimGraphImpulse EmptyNodes;
     AnimGraphTransitionData TransitionData;
+    bool StackOverFlow;
     Array<VisjectExecutor::Node*, FixedAllocation<ANIM_GRAPH_MAX_CALL_STACK>> CallStack;
     Array<VisjectExecutor::Graph*, FixedAllocation<32>> GraphStack;
+    Array<uint32, FixedAllocation<ANIM_GRAPH_MAX_CALL_STACK>> NodePath;
     Dictionary<VisjectExecutor::Node*, VisjectExecutor::Graph*> Functions;
     ChunkedArray<AnimGraphImpulse, 256> PoseCache;
     int32 PoseCacheSize;
     Dictionary<VisjectExecutor::Box*, Variant> ValueCache;
+
+    AnimGraphTraceEvent& AddTraceEvent(const AnimGraphNode* node);
 };
 
 /// <summary>
@@ -810,11 +784,11 @@ class AnimGraphExecutor : public VisjectExecutor
     friend AnimGraphNode;
 private:
     AnimGraph& _graph;
-    RootMotionMode _rootMotionMode = RootMotionMode::NoExtraction;
+    RootMotionExtraction _rootMotionMode = RootMotionExtraction::NoExtraction;
     int32 _skeletonNodesCount = 0;
 
     // Per-thread context to allow async execution
-    static ThreadLocal<AnimGraphContext> Context;
+    static ThreadLocal<AnimGraphContext*> Context;
 
 public:
     /// <summary>
@@ -886,13 +860,14 @@ private:
 
     int32 GetRootNodeIndex(Animation* anim);
     void ProcessAnimEvents(AnimGraphNode* node, bool loop, float length, float animPos, float animPrevPos, Animation* anim, float speed);
-    void ProcessAnimation(AnimGraphImpulse* nodes, AnimGraphNode* node, bool loop, float length, float pos, float prevPos, Animation* anim, float speed, float weight = 1.0f, ProcessAnimationMode mode = ProcessAnimationMode::Override);
+    void ProcessAnimation(AnimGraphImpulse* nodes, AnimGraphNode* node, bool loop, float length, float pos, float prevPos, Animation* anim, float speed, float weight = 1.0f, ProcessAnimationMode mode = ProcessAnimationMode::Override, BitArray<InlinedAllocation<8>>* usedNodes = nullptr);
     Variant SampleAnimation(AnimGraphNode* node, bool loop, float length, float startTimePos, float prevTimePos, float& newTimePos, Animation* anim, float speed);
     Variant SampleAnimationsWithBlend(AnimGraphNode* node, bool loop, float length, float startTimePos, float prevTimePos, float& newTimePos, Animation* animA, Animation* animB, float speedA, float speedB, float alpha);
     Variant SampleAnimationsWithBlend(AnimGraphNode* node, bool loop, float length, float startTimePos, float prevTimePos, float& newTimePos, Animation* animA, Animation* animB, Animation* animC, float speedA, float speedB, float speedC, float alphaA, float alphaB, float alphaC);
     Variant Blend(AnimGraphNode* node, const Value& poseA, const Value& poseB, float alpha, AlphaBlendMode alphaMode);
-    Variant SampleState(AnimGraphNode* state);
+    Variant SampleState(AnimGraphContext& context, const AnimGraphNode* state);
     void InitStateTransition(AnimGraphContext& context, AnimGraphInstanceData::StateMachineBucket& stateMachineBucket, AnimGraphStateTransition* transition = nullptr);
     AnimGraphStateTransition* UpdateStateTransitions(AnimGraphContext& context, const AnimGraphNode::StateMachineData& stateMachineData, AnimGraphNode* state, AnimGraphNode* ignoreState = nullptr);
+    AnimGraphStateTransition* UpdateStateTransitions(AnimGraphContext& context, const AnimGraphNode::StateMachineData& stateMachineData, const AnimGraphNode::StateBaseData& stateData, AnimGraphNode* state, AnimGraphNode* ignoreState = nullptr);
     void UpdateStateTransitions(AnimGraphContext& context, const AnimGraphNode::StateMachineData& stateMachineData, AnimGraphInstanceData::StateMachineBucket& stateMachineBucket, const AnimGraphNode::StateBaseData& stateData);
 };

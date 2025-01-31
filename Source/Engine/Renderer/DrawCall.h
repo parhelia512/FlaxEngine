@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -39,6 +39,8 @@ public:
     /// Returns true if sky is realtime, otherwise it's static.
     /// </summary>
     virtual bool IsDynamicSky() const = 0;
+
+    virtual float GetIndirectLightingIntensity() const = 0;
 
     /// <summary>
     /// Apply sky material/shader state to the GPU pipeline with custom parameters set (render to GBuffer).
@@ -86,7 +88,7 @@ public:
     /// </summary>
     /// <param name="view">The rendering view.</param>
     /// <param name="result">The result.</param>
-    virtual void GetExponentialHeightFogData(const RenderView& view, ExponentialHeightFogData& result) const = 0;
+    virtual void GetExponentialHeightFogData(const RenderView& view, ShaderExponentialHeightFogData& result) const = 0;
 
     /// <summary>
     /// Draw fog using GBuffer inputs

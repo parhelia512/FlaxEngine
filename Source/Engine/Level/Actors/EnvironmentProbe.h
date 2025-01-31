@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -89,13 +89,6 @@ public:
     /// True if probe is using custom cube texture (not baked).
     /// </summary>
     API_PROPERTY() bool IsUsingCustomProbe() const;
-
-    /// <summary>
-    /// Setup probe data structure
-    /// </summary>
-    /// <param name="renderContext">Rendering context</param>
-    /// <param name="data">Packed probe data to set</param>
-    void SetupProbeData(const RenderContext& renderContext, struct ProbeData* data) const;
 
     /// <summary>
     /// Gets the custom probe (null if using baked one or none).

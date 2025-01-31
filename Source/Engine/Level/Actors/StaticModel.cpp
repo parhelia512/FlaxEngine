@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "StaticModel.h"
 #include "Engine/Engine/Engine.h"
@@ -92,7 +92,7 @@ int32 StaticModel::GetSortOrder() const
 
 void StaticModel::SetSortOrder(int32 value)
 {
-    _sortOrder = (int16)Math::Clamp<int32>(value, MIN_int16, MAX_int16);
+    _sortOrder = (int8)Math::Clamp<int32>(value, MIN_int8, MAX_int8);
 }
 
 bool StaticModel::HasLightmap() const
@@ -283,7 +283,7 @@ void StaticModel::UpdateBounds()
     }
     BoundingSphere::FromBox(_box, _sphere);
     if (_sceneRenderingKey != -1)
-        GetSceneRendering()->UpdateActor(this, _sceneRenderingKey);
+        GetSceneRendering()->UpdateActor(this, _sceneRenderingKey, ISceneRenderingListener::Bounds);
 }
 
 void StaticModel::FlushVertexColors()
@@ -324,19 +324,19 @@ void StaticModel::Draw(RenderContext& renderContext)
         return;
     if (renderContext.View.Pass == DrawPass::GlobalSDF)
     {
-        if (EnumHasAnyFlags(DrawModes, DrawPass::GlobalSDF))
+        if (EnumHasAnyFlags(DrawModes, DrawPass::GlobalSDF) && Model->SDF.Texture)
             GlobalSignDistanceFieldPass::Instance()->RasterizeModelSDF(this, Model->SDF, _transform, _box);
         return;
     }
     if (renderContext.View.Pass == DrawPass::GlobalSurfaceAtlas)
     {
-        if (EnumHasAnyFlags(DrawModes, DrawPass::GlobalSurfaceAtlas))
+        if (EnumHasAnyFlags(DrawModes, DrawPass::GlobalSurfaceAtlas) && Model->SDF.Texture)
             GlobalSurfaceAtlasPass::Instance()->RasterizeActor(this, this, _sphere, _transform, Model->LODs.Last().GetBox());
         return;
     }
     Matrix world;
-    const Float3 translation = _transform.Translation - renderContext.View.Origin;
-    Matrix::Transformation(_transform.Scale, _transform.Orientation, translation, world);
+    GetLocalToWorldMatrix(world);
+    renderContext.View.GetWorldMatrix(world);
     GEOMETRY_DRAW_STATE_EVENT_BEGIN(_drawState, world);
     if (_vertexColorsDirty)
         FlushVertexColors();
@@ -346,7 +346,7 @@ void StaticModel::Draw(RenderContext& renderContext)
     draw.World = &world;
     draw.DrawState = &_drawState;
     draw.Deformation = _deformation;
-    draw.Lightmap = _scene->LightmapsData.GetReadyLightmap(Lightmap.TextureIndex);
+    draw.Lightmap = _scene ? _scene->LightmapsData.GetReadyLightmap(Lightmap.TextureIndex) : nullptr;
     draw.LightmapUVs = &Lightmap.UVsArea;
     draw.Flags = _staticFlags;
     draw.DrawModes = DrawModes;
@@ -357,6 +357,10 @@ void StaticModel::Draw(RenderContext& renderContext)
     draw.ForcedLOD = _forcedLod;
     draw.SortOrder = _sortOrder;
     draw.VertexColors = _vertexColorsCount ? _vertexColorsBuffer : nullptr;
+#if USE_EDITOR
+    if (HasStaticFlag(StaticFlags::Lightmap))
+        draw.LightmapScale = _scaleInLightmap;
+#endif
 
     Model->Draw(renderContext, draw);
 
@@ -369,8 +373,8 @@ void StaticModel::Draw(RenderContextBatch& renderContextBatch)
         return;
     const RenderContext& renderContext = renderContextBatch.GetMainContext();
     Matrix world;
-    const Float3 translation = _transform.Translation - renderContext.View.Origin;
-    Matrix::Transformation(_transform.Scale, _transform.Orientation, translation, world);
+    GetLocalToWorldMatrix(world);
+    renderContext.View.GetWorldMatrix(world);
     GEOMETRY_DRAW_STATE_EVENT_BEGIN(_drawState, world);
     if (_vertexColorsDirty)
         FlushVertexColors();
@@ -380,7 +384,7 @@ void StaticModel::Draw(RenderContextBatch& renderContextBatch)
     draw.World = &world;
     draw.DrawState = &_drawState;
     draw.Deformation = _deformation;
-    draw.Lightmap = _scene->LightmapsData.GetReadyLightmap(Lightmap.TextureIndex);
+    draw.Lightmap = _scene ? _scene->LightmapsData.GetReadyLightmap(Lightmap.TextureIndex) : nullptr;
     draw.LightmapUVs = &Lightmap.UVsArea;
     draw.Flags = _staticFlags;
     draw.DrawModes = DrawModes;
@@ -391,6 +395,10 @@ void StaticModel::Draw(RenderContextBatch& renderContextBatch)
     draw.ForcedLOD = _forcedLod;
     draw.SortOrder = _sortOrder;
     draw.VertexColors = _vertexColorsCount ? _vertexColorsBuffer : nullptr;
+#if USE_EDITOR
+    if (HasStaticFlag(StaticFlags::Lightmap))
+        draw.LightmapScale = _scaleInLightmap;
+#endif
 
     Model->Draw(renderContextBatch, draw);
 
@@ -400,13 +408,13 @@ void StaticModel::Draw(RenderContextBatch& renderContextBatch)
 bool StaticModel::IntersectsItself(const Ray& ray, Real& distance, Vector3& normal)
 {
     bool result = false;
-
     if (Model != nullptr && Model->IsLoaded())
     {
         Mesh* mesh;
-        result = Model->Intersects(ray, _transform, distance, normal, &mesh);
+        Matrix world;
+        GetLocalToWorldMatrix(world);
+        result = Model->Intersects(ray, world, distance, normal, &mesh);
     }
-
     return result;
 }
 
@@ -553,13 +561,11 @@ const Span<MaterialSlot> StaticModel::GetMaterialSlots() const
 
 MaterialBase* StaticModel::GetMaterial(int32 entryIndex)
 {
-    if (Model)
-        Model->WaitForLoaded();
-    else
+    if (!Model || Model->WaitForLoaded())
         return nullptr;
     CHECK_RETURN(entryIndex >= 0 && entryIndex < Entries.Count(), nullptr);
     MaterialBase* material = Entries[entryIndex].Material.Get();
-    if (!material)
+    if (!material && entryIndex < Model->MaterialSlots.Count())
     {
         material = Model->MaterialSlots[entryIndex].Material.Get();
         if (!material)

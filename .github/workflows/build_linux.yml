@@ -10,22 +10,19 @@ jobs:
   # Editor
   editor-linux:
     name: Editor (Linux, Development x64)
-    runs-on: "ubuntu-20.04"
+    runs-on: "ubuntu-24.04"
     steps:
     - name: Checkout repo
       uses: actions/checkout@v3
     - name: Install dependencies
       run: |
-        sudo rm -f /etc/apt/sources.list.d/*
-        sudo cp -f .github/workflows/build_linux_sources.list /etc/apt/sources.list
-        sudo apt-get update
         sudo apt-get install libx11-dev libxcursor-dev libxinerama-dev build-essential gettext libtool libtool-bin libpulse-dev libasound2-dev libjack-dev portaudio19-dev
     - name: Setup Vulkan
       uses: ./.github/actions/vulkan
     - name: Setup .NET
       uses: actions/setup-dotnet@v3
       with:
-        dotnet-version: 7.0.x
+        dotnet-version: 8.0.x
     - name: Print .NET info
       run: |
         dotnet --info
@@ -36,12 +33,12 @@ jobs:
         git lfs pull
     - name: Build
       run: |
-        ./Development/Scripts/Linux/CallBuildTool.sh -build -log -printSDKs -dotnet=7 -arch=x64 -platform=Linux -configuration=Development -buildtargets=FlaxEditor
+        ./Development/Scripts/Linux/CallBuildTool.sh -build -log -printSDKs -dotnet=8 -arch=x64 -platform=Linux -configuration=Development -buildtargets=FlaxEditor
 
   # Game
   game-linux:
     name: Game (Linux, Release x64)
-    runs-on: "ubuntu-20.04"
+    runs-on: "ubuntu-24.04"
     steps:
     - name: Checkout repo
       uses: actions/checkout@v3
@@ -53,7 +50,7 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v3
       with:
-        dotnet-version: 7.0.x
+        dotnet-version: 8.0.x
     - name: Print .NET info
       run: |
         dotnet --info
@@ -64,4 +61,4 @@ jobs:
         git lfs pull
     - name: Build
       run: |
-        ./Development/Scripts/Linux/CallBuildTool.sh -build -log -printSDKs -dotnet=7 -arch=x64 -platform=Linux -configuration=Release -buildtargets=FlaxGame
+        ./Development/Scripts/Linux/CallBuildTool.sh -build -log -printSDKs -dotnet=8 -arch=x64 -platform=Linux -configuration=Release -buildtargets=FlaxGame
