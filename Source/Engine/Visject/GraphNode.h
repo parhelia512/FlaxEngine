@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -10,8 +10,6 @@ template<class BoxType>
 class GraphNode;
 
 #define GRAPH_NODE_MAKE_TYPE(groupID, typeID) (uint32)((groupID) << 16 | (typeID))
-
-#define GRAPH_NODE_MAX_VALUES 32
 
 /// <summary>
 /// Represents single box of the graph node
@@ -114,14 +112,13 @@ public:
             uint16 TypeID;
             uint16 GroupID;
         };
-
         uint32 Type;
     };
 
     /// <summary>
     /// List of all node values. Array size and value types are constant over time. Only value data can change.
     /// </summary>
-    Array<Variant, FixedAllocation<GRAPH_NODE_MAX_VALUES>> Values;
+    Array<Variant, InlinedAllocation<8>> Values;
 
     /// <summary>
     /// Node boxes cache. Array index matches the box ID (for fast O(1) lookups).

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "GPUTasksManager.h"
 #include "GPUTask.h"
@@ -9,9 +9,8 @@
 
 void GPUTask::Execute(GPUTasksContext* context)
 {
-    // Begin
     ASSERT(IsQueued() && _context == nullptr);
-    _state = TaskState::Running;
+    SetState(TaskState::Running);
 
     // Perform an operation
     const auto result = run(context);
@@ -19,7 +18,7 @@ void GPUTask::Execute(GPUTasksContext* context)
     // Process result
     if (IsCancelRequested())
     {
-        _state = TaskState::Canceled;
+        SetState(TaskState::Canceled);
     }
     else if (result != Result::Ok)
     {
@@ -31,6 +30,11 @@ void GPUTask::Execute(GPUTasksContext* context)
         // Save task completion point (for synchronization)
         _syncPoint = context->GetCurrentSyncPoint();
         _context = context;
+        if (_syncLatency == 0)
+        {
+            // No delay on sync
+            Sync();
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -197,7 +197,7 @@ namespace FlaxEngine.GUI
                 textBlock.Range = new TextRange
                 {
                     StartIndex = start + line.FirstCharIndex,
-                    EndIndex = start + line.LastCharIndex,
+                    EndIndex = start + line.LastCharIndex + 1,
                 };
                 if (i != 0)
                 {

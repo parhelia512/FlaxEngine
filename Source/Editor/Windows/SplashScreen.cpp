@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "SplashScreen.h"
 #include "Engine/Core/Log.h"
@@ -135,6 +135,7 @@ const Char* SplashScreenQuotes[] =
     TEXT("Drum roll please"),
     TEXT("Good Luck Have Fun"),
     TEXT("GG Well Played"),
+    TEXT("Now with documentation."),
 };
 
 SplashScreen::~SplashScreen()

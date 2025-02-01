@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "TerrainChunk.h"
 #include "Engine/Serialization/Serialization.h"
@@ -9,9 +9,17 @@
 #include "Engine/Graphics/RenderTask.h"
 #include "Engine/Graphics/Textures/GPUTexture.h"
 #include "Engine/Renderer/RenderList.h"
+#include "Engine/Graphics/RenderTools.h"
 #include "Engine/Core/Math/OrientedBoundingBox.h"
 #include "Engine/Level/Scene/Scene.h"
+#if USE_EDITOR
 #include "Engine/Level/Prefabs/PrefabManager.h"
+#endif
+
+TerrainChunk::TerrainChunk(const SpawnParams& params)
+    : ScriptingObject(params)
+{
+}
 
 void TerrainChunk::Init(TerrainPatch* patch, uint16 x, uint16 z)
 {
@@ -21,7 +29,7 @@ void TerrainChunk::Init(TerrainPatch* patch, uint16 x, uint16 z)
     _z = z;
     _yOffset = 0;
     _yHeight = 1;
-    _heightmapUVScaleBias = Float4(1.0f, 1.0f, _x, _z) * (1.0f / TerrainPatch::CHUNKS_COUNT_EDGE);
+    _heightmapUVScaleBias = Float4(1.0f, 1.0f, _x, _z) * (1.0f / Terrain::ChunksCountEdge);
     _perInstanceRandom = (_patch->_terrain->_id.C ^ _x ^ _z) * (1.0f / (float)MAX_uint32);
     OverrideMaterial = nullptr;
 }
@@ -51,8 +59,8 @@ bool TerrainChunk::PrepareDraw(const RenderContext& renderContext)
 
         //lod = 0;
         //lod = 10;
-        //lod = (_x + _z + TerrainPatch::CHUNKS_COUNT_EDGE * (_patch->_x + _patch->_z));
-        //lod = (int32)Vector2::Distance(Vector2(2, 2), Vector2(_patch->_x, _patch->_z) * TerrainPatch::CHUNKS_COUNT_EDGE + Vector2(_x, _z));
+        //lod = (_x + _z + Terrain::ChunksCountEdge * (_patch->_x + _patch->_z));
+        //lod = (int32)Vector2::Distance(Vector2(2, 2), Vector2(_patch->_x, _patch->_z) * Terrain::ChunksCountEdge + Vector2(_x, _z));
         //lod = (int32)(Vector3::Distance(_bounds.GetCenter(), view.Position) / 10000.0f);
     }
     lod = Math::Clamp(lod, minStreamedLod, lodCount - 1);
@@ -90,10 +98,10 @@ void TerrainChunk::Draw(const RenderContext& renderContext) const
     drawCall.Material = _cachedDrawMaterial;
     renderContext.View.GetWorldMatrix(_transform, drawCall.World);
     drawCall.ObjectPosition = drawCall.World.GetTranslation();
-    drawCall.ObjectRadius = _sphere.Radius;
+    drawCall.ObjectRadius = (float)_sphere.Radius;
     drawCall.Terrain.Patch = _patch;
     drawCall.Terrain.HeightmapUVScaleBias = _heightmapUVScaleBias;
-    drawCall.Terrain.OffsetUV = Vector2((float)(_patch->_x * TerrainPatch::CHUNKS_COUNT_EDGE + _x), (float)(_patch->_z * TerrainPatch::CHUNKS_COUNT_EDGE + _z));
+    drawCall.Terrain.OffsetUV = Vector2((float)(_patch->_x * Terrain::ChunksCountEdge + _x), (float)(_patch->_z * Terrain::ChunksCountEdge + _z));
     drawCall.Terrain.CurrentLOD = (float)lod;
     drawCall.Terrain.ChunkSizeNextLOD = (float)(((chunkSize + 1) >> (lod + 1)) - 1);
     drawCall.Terrain.TerrainChunkSizeLOD0 = TERRAIN_UNITS_PER_VERTEX * chunkSize;
@@ -114,8 +122,12 @@ void TerrainChunk::Draw(const RenderContext& renderContext) const
         drawCall.Terrain.Lightmap = nullptr;
         drawCall.Terrain.LightmapUVsArea = Rectangle::Empty;
     }
-    drawCall.WorldDeterminantSign = Math::FloatSelect(drawCall.World.RotDeterminant(), 1, -1);
+    drawCall.WorldDeterminantSign = RenderTools::GetWorldDeterminantSign(drawCall.World);
     drawCall.PerInstanceRandom = _perInstanceRandom;
+#if USE_EDITOR
+    if (renderContext.View.Mode == ViewMode::LightmapUVsDensity)
+        drawCall.Surface.LODDitherFactor = 1.0f; // See LightmapUVsDensityMaterialShader
+#endif
 
     // Add half-texel offset for heightmap sampling in vertex shader
     //const float lodHeightmapSize = Math::Max(1, drawCall.TerrainData.Heightmap->Width() >> lod);
@@ -148,10 +160,10 @@ void TerrainChunk::Draw(const RenderContext& renderContext, MaterialBase* materi
     drawCall.Material = material;
     renderContext.View.GetWorldMatrix(_transform, drawCall.World);
     drawCall.ObjectPosition = drawCall.World.GetTranslation();
-    drawCall.ObjectRadius = _sphere.Radius;
+    drawCall.ObjectRadius = (float)_sphere.Radius;
     drawCall.Terrain.Patch = _patch;
     drawCall.Terrain.HeightmapUVScaleBias = _heightmapUVScaleBias;
-    drawCall.Terrain.OffsetUV = Vector2((float)(_patch->_x * TerrainPatch::CHUNKS_COUNT_EDGE + _x), (float)(_patch->_z * TerrainPatch::CHUNKS_COUNT_EDGE + _z));
+    drawCall.Terrain.OffsetUV = Vector2((float)(_patch->_x * Terrain::ChunksCountEdge + _x), (float)(_patch->_z * Terrain::ChunksCountEdge + _z));
     drawCall.Terrain.CurrentLOD = (float)lod;
     drawCall.Terrain.ChunkSizeNextLOD = (float)(((chunkSize + 1) >> (lod + 1)) - 1);
     drawCall.Terrain.TerrainChunkSizeLOD0 = TERRAIN_UNITS_PER_VERTEX * chunkSize;
@@ -171,8 +183,12 @@ void TerrainChunk::Draw(const RenderContext& renderContext, MaterialBase* materi
         drawCall.Terrain.Lightmap = nullptr;
         drawCall.Terrain.LightmapUVsArea = Rectangle::Empty;
     }
-    drawCall.WorldDeterminantSign = Math::FloatSelect(drawCall.World.RotDeterminant(), 1, -1);
+    drawCall.WorldDeterminantSign = RenderTools::GetWorldDeterminantSign(drawCall.World);
     drawCall.PerInstanceRandom = _perInstanceRandom;
+#if USE_EDITOR
+    if (renderContext.View.Mode == ViewMode::LightmapUVsDensity)
+        drawCall.Surface.LODDitherFactor = 1.0f; // See LightmapUVsDensityMaterialShader
+#endif
 
     // Add half-texel offset for heightmap sampling in vertex shader
     //const float lodHeightmapSize = Math::Max(1, drawCall.TerrainData.Heightmap->Width() >> lod);
@@ -232,46 +248,46 @@ void TerrainChunk::CacheNeighbors()
     _neighbors[0] = this;
     if (_z > 0)
     {
-        _neighbors[0] = &_patch->Chunks[(_z - 1) * TerrainPatch::CHUNKS_COUNT_EDGE + _x];
+        _neighbors[0] = &_patch->Chunks[(_z - 1) * Terrain::ChunksCountEdge + _x];
     }
     else
     {
         const auto patch = _patch->_terrain->GetPatch(_patch->_x, _patch->_z - 1);
         if (patch)
-            _neighbors[0] = &patch->Chunks[(TerrainPatch::CHUNKS_COUNT_EDGE - 1) * TerrainPatch::CHUNKS_COUNT_EDGE + _x];
+            _neighbors[0] = &patch->Chunks[(Terrain::ChunksCountEdge - 1) * Terrain::ChunksCountEdge + _x];
     }
 
     // 1: left
     _neighbors[1] = this;
     if (_x > 0)
     {
-        _neighbors[1] = &_patch->Chunks[_z * TerrainPatch::CHUNKS_COUNT_EDGE + (_x - 1)];
+        _neighbors[1] = &_patch->Chunks[_z * Terrain::ChunksCountEdge + (_x - 1)];
     }
     else
     {
         const auto patch = _patch->_terrain->GetPatch(_patch->_x - 1, _patch->_z);
         if (patch)
-            _neighbors[1] = &patch->Chunks[_z * TerrainPatch::CHUNKS_COUNT_EDGE + (TerrainPatch::CHUNKS_COUNT_EDGE - 1)];
+            _neighbors[1] = &patch->Chunks[_z * Terrain::ChunksCountEdge + (Terrain::ChunksCountEdge - 1)];
     }
 
     // 2: right 
     _neighbors[2] = this;
-    if (_x < TerrainPatch::CHUNKS_COUNT_EDGE - 1)
+    if (_x < Terrain::ChunksCountEdge - 1)
     {
-        _neighbors[2] = &_patch->Chunks[_z * TerrainPatch::CHUNKS_COUNT_EDGE + (_x + 1)];
+        _neighbors[2] = &_patch->Chunks[_z * Terrain::ChunksCountEdge + (_x + 1)];
     }
     else
     {
         const auto patch = _patch->_terrain->GetPatch(_patch->_x + 1, _patch->_z);
         if (patch)
-            _neighbors[2] = &patch->Chunks[_z * TerrainPatch::CHUNKS_COUNT_EDGE];
+            _neighbors[2] = &patch->Chunks[_z * Terrain::ChunksCountEdge];
     }
 
     // 3: top
     _neighbors[3] = this;
-    if (_z < TerrainPatch::CHUNKS_COUNT_EDGE - 1)
+    if (_z < Terrain::ChunksCountEdge - 1)
     {
-        _neighbors[3] = &_patch->Chunks[(_z + 1) * TerrainPatch::CHUNKS_COUNT_EDGE + _x];
+        _neighbors[3] = &_patch->Chunks[(_z + 1) * Terrain::ChunksCountEdge + _x];
     }
     else
     {

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if COMPILE_WITH_ASSETS_IMPORTER
 
@@ -234,7 +234,6 @@ bool AssetsImportingManager::Create(const String& tag, const StringView& outputP
         LOG(Warning, "Cannot find asset creator object for tag \'{0}\'.", tag);
         return true;
     }
-
     return Create(creator->Callback, outputPath, assetId, arg);
 }
 
@@ -414,6 +413,7 @@ bool AssetsImportingManagerService::Init()
         { TEXT("jpg"), ASSET_FILES_EXTENSION, ImportTexture::Import },
         { TEXT("hdr"), ASSET_FILES_EXTENSION, ImportTexture::Import },
         { TEXT("raw"), ASSET_FILES_EXTENSION, ImportTexture::Import },
+        { TEXT("exr"), ASSET_FILES_EXTENSION, ImportTexture::Import },
 
         // IES Profiles
         { TEXT("ies"), ASSET_FILES_EXTENSION, ImportTexture::ImportIES },

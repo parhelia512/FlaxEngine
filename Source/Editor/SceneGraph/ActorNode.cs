@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if USE_LARGE_WORLDS
 using Real = System.Double;
@@ -215,10 +215,10 @@ namespace FlaxEditor.SceneGraph
         public override bool CanDuplicate => (_actor.HideFlags & HideFlags.HideInHierarchy) == 0;
 
         /// <inheritdoc />
-        public override bool IsActive => _actor.IsActive;
+        public override bool IsActive => _actor?.IsActive ?? false;
 
         /// <inheritdoc />
-        public override bool IsActiveInHierarchy => _actor.IsActiveInHierarchy;
+        public override bool IsActiveInHierarchy => _actor?.IsActiveInHierarchy ?? false;
 
         /// <inheritdoc />
         public override int OrderInParent
@@ -316,41 +316,7 @@ namespace FlaxEditor.SceneGraph
         {
             base.OnParentChanged();
 
-            // Update UI (special case if actor is spawned and added to existing scene tree)
-            var parentTreeNode = (parentNode as ActorNode)?.TreeNode;
-            if (parentTreeNode != null && !parentTreeNode.IsLayoutLocked)
-            {
-                parentTreeNode.IsLayoutLocked = true;
-                _treeNode.Parent = parentTreeNode;
-                _treeNode.IndexInParent = _actor.OrderInParent;
-                parentTreeNode.IsLayoutLocked = false;
-
-                // Skip UI update if node won't be in a view
-                if (parentTreeNode.IsCollapsed)
-                {
-                    TreeNode.UnlockChildrenRecursive();
-                }
-                else
-                {
-                    // Try to perform layout at the level where it makes it the most performant (the least computations)
-                    var tree = parentTreeNode.ParentTree;
-                    if (tree != null)
-                    {
-                        if (tree.Parent is FlaxEngine.GUI.Panel treeParent)
-                            treeParent.PerformLayout();
-                        else
-                            tree.PerformLayout();
-                    }
-                    else
-                    {
-                        parentTreeNode.PerformLayout();
-                    }
-                }
-            }
-            else
-            {
-                _treeNode.Parent = parentTreeNode;
-            }
+            _treeNode.OnParentChanged(_actor, parentNode as ActorNode);
         }
 
         /// <inheritdoc />

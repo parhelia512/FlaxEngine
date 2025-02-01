@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -22,6 +22,17 @@ public:
     /// The list of registered navigation meshes (on the scene).
     /// </summary>
     Array<NavMesh*> Meshes;
+
+    /// <summary>
+    /// The list of registered navigation-relevant actors (on the scene).
+    /// </summary>
+    Array<Actor*> Actors;
+
+public:
+    /// <summary>
+    /// Clears this instance data.
+    /// </summary>
+    void Clear();
 
     /// <summary>
     /// Gets the total navigation volumes bounds.

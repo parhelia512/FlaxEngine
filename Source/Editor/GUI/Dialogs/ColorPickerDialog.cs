@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using FlaxEditor.GUI.Input;
 using FlaxEngine;
@@ -40,6 +40,7 @@ namespace FlaxEditor.GUI.Dialogs
         private bool _disableEvents;
         private bool _useDynamicEditing;
         private bool _activeEyedropper;
+        private bool _canPassLastChangeEvent = true;
         private ColorValueBox.ColorPickerEvent _onChanged;
         private ColorValueBox.ColorPickerClosedEvent _onClosed;
 
@@ -119,10 +120,8 @@ namespace FlaxEditor.GUI.Dialogs
             _onClosed = pickerClosed;
 
             // Get saved colors if they exist
-            if (Editor.Instance.ProjectCache.TryGetCustomData("ColorPickerSavedColors", out var savedColors))
-            {
+            if (Editor.Instance.ProjectCache.TryGetCustomData("ColorPickerSavedColors", out string savedColors))
                 _savedColors = JsonSerializer.Deserialize<List<Color>>(savedColors);
-            }
 
             // Selector
             _cSelector = new ColorSelectorWithSliders(180, 18)
@@ -264,6 +263,7 @@ namespace FlaxEditor.GUI.Dialogs
                     {
                         Text = "+",
                         Parent = this,
+                        TooltipText = "Save Color.",
                         Tag = null,
                     };
                     savedColorButton.ButtonClicked += (b) => OnSavedColorButtonClicked(b);
@@ -370,9 +370,25 @@ namespace FlaxEditor.GUI.Dialogs
             Render2D.DrawText(style.FontMedium, "Hex", hex, textColor, TextAlignment.Near, TextAlignment.Center);
 
             // Color difference
-            var newRect = new Rectangle(_cOK.X, _cHex.Bottom + PickerMargin, _cCancel.Right - _cOK.Left, 0);
-            newRect.Size.Y = _cValue.Bottom - newRect.Y;
-            Render2D.FillRectangle(newRect, _value * _value.A);
+            var newRect = new Rectangle(_cOK.X - 3, _cHex.Bottom + PickerMargin, 130, 0);
+            newRect.Size.Y = 50;
+            Render2D.FillRectangle(newRect, Color.White);
+            var smallRectSize = 10;
+            var numHor = Mathf.FloorToInt(newRect.Width / smallRectSize);
+            var numVer = Mathf.FloorToInt(newRect.Height / smallRectSize);
+            // Draw checkerboard for background of color to help with transparency
+            for (int i = 0; i < numHor; i++)
+            {
+                for (int j = 0; j < numVer; j++)
+                {
+                    if ((i + j) % 2 == 0)
+                    {
+                        var rect = new Rectangle(newRect.X + smallRectSize * i, newRect.Y + smallRectSize * j, new Float2(smallRectSize));
+                        Render2D.FillRectangle(rect, Color.Gray);
+                    }
+                }
+            }
+            Render2D.FillRectangle(newRect, _value);
         }
 
         /// <inheritdoc />
@@ -380,7 +396,7 @@ namespace FlaxEditor.GUI.Dialogs
         {
             // Auto cancel on lost focus
 #if !PLATFORM_LINUX
-            ((WindowRootControl)Root).Window.LostFocus += OnCancel;
+            ((WindowRootControl)Root).Window.LostFocus += OnWindowLostFocus;
 #endif
 
             base.OnShow();
@@ -489,7 +505,7 @@ namespace FlaxEditor.GUI.Dialogs
                     BackgroundColorHighlighted = savedColor,
                     BackgroundColorSelected = savedColor.RGBMultiplied(0.8f),
                 };
-                savedColorButton.ButtonClicked += (b) => OnSavedColorButtonClicked(b);
+                savedColorButton.ButtonClicked += OnSavedColorButtonClicked;
                 _savedColorButtons.Add(savedColorButton);
             }
             if (_savedColors.Count < 8)
@@ -498,11 +514,25 @@ namespace FlaxEditor.GUI.Dialogs
                 {
                     Text = "+",
                     Parent = this,
+                    TooltipText = "Save Color.",
                     Tag = null,
                 };
-                savedColorButton.ButtonClicked += (b) => OnSavedColorButtonClicked(b);
+                savedColorButton.ButtonClicked += OnSavedColorButtonClicked;
                 _savedColorButtons.Add(savedColorButton);
             }
+        }
+
+        private void OnWindowLostFocus()
+        {
+            // Auto apply color on defocus
+            var autoAcceptColorPickerChange = Editor.Instance.Options.Options.Interface.AutoAcceptColorPickerChange;
+            if (_useDynamicEditing && _initialValue != _value && _canPassLastChangeEvent && autoAcceptColorPickerChange)
+            {
+                _canPassLastChangeEvent = false;
+                _onChanged?.Invoke(_value, false);
+            }
+
+            OnCancel();
         }
 
         /// <inheritdoc />
@@ -529,8 +559,9 @@ namespace FlaxEditor.GUI.Dialogs
             _disableEvents = true;
 
             // Restore color if modified
-            if (_useDynamicEditing && _initialValue != _value)
+            if (_useDynamicEditing && _initialValue != _value && _canPassLastChangeEvent)
             {
+                _canPassLastChangeEvent = false;
                 _onChanged?.Invoke(_initialValue, false);
             }
 

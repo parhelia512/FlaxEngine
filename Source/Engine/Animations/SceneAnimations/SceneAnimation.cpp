@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "SceneAnimation.h"
 #include "Engine/Core/Log.h"
@@ -35,7 +35,7 @@ const BytesContainer& SceneAnimation::LoadTimeline()
 
 #if USE_EDITOR
 
-bool SceneAnimation::SaveTimeline(BytesContainer& data)
+bool SceneAnimation::SaveTimeline(const BytesContainer& data)
 {
     // Wait for asset to be loaded or don't if last load failed (eg. by shader source compilation error)
     if (LastLoadFailed())
@@ -75,16 +75,16 @@ bool SceneAnimation::SaveTimeline(BytesContainer& data)
 
 #if USE_EDITOR
 
-void SceneAnimation::GetReferences(Array<Guid>& output) const
+void SceneAnimation::GetReferences(Array<Guid>& assets, Array<String>& files) const
 {
     // Base
-    BinaryAsset::GetReferences(output);
+    BinaryAsset::GetReferences(assets, files);
 
     for (int32 i = 0; i < Tracks.Count(); i++)
     {
         const auto& track = Tracks[i];
         if (track.Asset)
-            output.Add(track.Asset->GetID());
+            assets.Add(track.Asset->GetID());
     }
 }
 
@@ -281,10 +281,26 @@ Asset::LoadResult SceneAnimation::load()
                 track.TrackStateIndex = TrackStatesCount++;
                 trackRuntime->PropertyName = stream.Move<char>(trackData->PropertyNameLength + 1);
                 trackRuntime->PropertyTypeName = stream.Move<char>(trackData->PropertyTypeNameLength + 1);
-                const int32 keyframesDataSize = trackData->KeyframesCount * (sizeof(float) + trackData->ValueSize);
+                int32 keyframesDataSize = trackData->KeyframesCount * (sizeof(float) + trackData->ValueSize);
+                if (trackData->ValueSize == 0)
+                {
+                    // When using json data (from non-POD types) read the sum of all keyframes data
+                    const int32 keyframesDataStart = stream.GetPosition();
+                    for (int32 j = 0; j < trackData->KeyframesCount; j++)
+                    {
+                        stream.Move<float>(); // Time
+                        int32 jsonLen;
+                        stream.ReadInt32(&jsonLen);
+                        stream.Move(jsonLen);
+                    }
+                    const int32 keyframesDataEnd = stream.GetPosition();
+                    stream.SetPosition(keyframesDataStart);
+                    keyframesDataSize = keyframesDataEnd - keyframesDataStart;
+                }
                 trackRuntime->ValueSize = trackData->ValueSize;
                 trackRuntime->KeyframesCount = trackData->KeyframesCount;
                 trackRuntime->Keyframes = stream.Move(keyframesDataSize);
+                trackRuntime->KeyframesSize = keyframesDataSize;
                 needsParent = true;
                 break;
             }
@@ -298,6 +314,7 @@ Asset::LoadResult SceneAnimation::load()
                 trackRuntime->PropertyName = stream.Move<char>(trackData->PropertyNameLength + 1);
                 trackRuntime->PropertyTypeName = stream.Move<char>(trackData->PropertyTypeNameLength + 1);
                 const int32 keyframesDataSize = trackData->KeyframesCount * (sizeof(float) + trackData->ValueSize * 3);
+                ASSERT(trackData->ValueSize > 0);
                 trackRuntime->ValueSize = trackData->ValueSize;
                 trackRuntime->KeyframesCount = trackData->KeyframesCount;
                 trackRuntime->Keyframes = stream.Move(keyframesDataSize);
@@ -375,6 +392,7 @@ Asset::LoadResult SceneAnimation::load()
                 trackRuntime->PropertyName = stream.Move<char>(trackData->PropertyNameLength + 1);
                 trackRuntime->PropertyTypeName = stream.Move<char>(trackData->PropertyTypeNameLength + 1);
                 trackRuntime->ValueSize = trackData->ValueSize;
+                ASSERT(trackData->ValueSize > 0);
                 trackRuntime->KeyframesCount = trackData->KeyframesCount;
                 const auto keyframesTimes = (float*)((byte*)trackRuntime + sizeof(StringPropertyTrack::Runtime));
                 const auto keyframesLengths = (int32*)((byte*)keyframesTimes + sizeof(float) * trackData->KeyframesCount);

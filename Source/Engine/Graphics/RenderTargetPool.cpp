@@ -1,9 +1,13 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "RenderTargetPool.h"
 #include "GPUDevice.h"
+#if BUILD_DEBUG
+#include "GPUContext.h"
+#endif
 #include "Engine/Core/Log.h"
 #include "Engine/Engine/Engine.h"
+#include "Engine/Profiler/ProfilerCPU.h"
 
 struct Entry
 {
@@ -20,9 +24,11 @@ namespace
 
 void RenderTargetPool::Flush(bool force, int32 framesOffset)
 {
+    PROFILE_CPU();
     if (framesOffset < 0)
         framesOffset = 3 * 60; // For how many frames RTs should be cached (by default)
-    const uint64 maxReleaseFrame = Engine::FrameCount - framesOffset;
+    const uint64 frameCount = Engine::FrameCount;
+    const uint64 maxReleaseFrame = frameCount - Math::Min<uint64>(frameCount, framesOffset);
     force |= Engine::ShouldExit();
 
     for (int32 i = 0; i < TemporaryRTs.Count(); i++)
@@ -40,6 +46,15 @@ void RenderTargetPool::Flush(bool force, int32 framesOffset)
 
 GPUTexture* RenderTargetPool::Get(const GPUTextureDescription& desc)
 {
+    PROFILE_CPU();
+
+    // Initialize render targets with pink color in debug builds to prevent incorrect data usage (GPU doesn't clear texture upon creation)
+#if BUILD_DEBUG
+    #define RENDER_TARGET_POOL_CLEAR() if (desc.Dimensions == TextureDimensions::Texture && EnumHasAllFlags(desc.Flags, GPUTextureFlags::RenderTarget) && GPUDevice::Instance->IsRendering() && IsInMainThread()) GPUDevice::Instance->GetMainContext()->Clear(e.RT->View(), Color::Pink);
+#else
+    #define RENDER_TARGET_POOL_CLEAR()
+#endif
+
     // Find free render target with the same properties
     const uint32 descHash = GetHash(desc);
     for (int32 i = 0; i < TemporaryRTs.Count(); i++)
@@ -49,6 +64,7 @@ GPUTexture* RenderTargetPool::Get(const GPUTextureDescription& desc)
         {
             // Mark as used
             e.IsOccupied = true;
+            RENDER_TARGET_POOL_CLEAR();
             return e.RT;
         }
     }
@@ -77,7 +93,9 @@ GPUTexture* RenderTargetPool::Get(const GPUTextureDescription& desc)
     e.RT = rt;
     e.DescriptionHash = descHash;
     TemporaryRTs.Add(e);
+    RENDER_TARGET_POOL_CLEAR();
 
+#undef RENDER_TARGET_POOL_CLEAR
     return rt;
 }
 
@@ -85,7 +103,6 @@ void RenderTargetPool::Release(GPUTexture* rt)
 {
     if (!rt)
         return;
-
     for (int32 i = 0; i < TemporaryRTs.Count(); i++)
     {
         auto& e = TemporaryRTs[i];
@@ -98,6 +115,5 @@ void RenderTargetPool::Release(GPUTexture* rt)
             return;
         }
     }
-
     LOG(Error, "Trying to release temporary render target which has not been registered in service!");
 }

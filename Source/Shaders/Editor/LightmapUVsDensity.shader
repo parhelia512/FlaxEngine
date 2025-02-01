@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #define MATERIAL 1
 
@@ -98,7 +98,11 @@ void PS(in PixelInput input, out float4 Light : SV_Target0, out float4 RT0 : SV_
 	float3 minColor = float3(235/255.0, 52/255.0, 67/255.0);
 	float3 bestColor = float3(51/255.0, 235/255.0, 70/255.0);
 	float3 maxColor = float3(52/255.0, 149/255.0, 235/255.0);
-	if (density < bestDensity)
+    if (LightmapSize < 0.0f)
+    {
+        color = float3(52/255.0, 229/255.0, 235/255.0); // No lightmap
+    }
+    else if (density < bestDensity)
 	{
 		color = lerp(minColor, bestColor, (density - minDensity) / (bestDensity - minDensity));
 	}

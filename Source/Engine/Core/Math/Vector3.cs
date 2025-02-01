@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if USE_LARGE_WORLDS
 using Real = System.Double;
@@ -256,7 +256,7 @@ namespace FlaxEngine
         /// <summary>
         /// Gets a value indicting whether this instance is normalized.
         /// </summary>
-        public bool IsNormalized => Mathr.IsOne(X * X + Y * Y + Z * Z);
+        public bool IsNormalized => Mathr.Abs((X * X + Y * Y + Z * Z) - 1.0f) < 1e-4f;
 
         /// <summary>
         /// Gets the normalized vector. Returned vector has length equal 1.
@@ -1669,6 +1669,58 @@ namespace FlaxEngine
         {
             TransformNormal(ref normal, ref transform, out var result);
             return result;
+        }
+
+        /// <summary>
+        /// Snaps the input position onto the grid.
+        /// </summary>
+        /// <param name="pos">The position to snap.</param>
+        /// <param name="gridSize">The size of the grid.</param>
+        /// <returns>The position snapped to the grid.</returns>
+        public static Vector3 SnapToGrid(Vector3 pos, Vector3 gridSize)
+        {
+            pos.X = Mathr.Ceil((pos.X - (gridSize.X * 0.5f)) / gridSize.X) * gridSize.X;
+            pos.Y = Mathr.Ceil((pos.Y - (gridSize.Y * 0.5f)) / gridSize.Y) * gridSize.Y;
+            pos.Z = Mathr.Ceil((pos.Z - (gridSize.Z * 0.5f)) / gridSize.Z) * gridSize.Z;
+            return pos;
+        }
+
+        /// <summary>
+        /// Snaps the <paramref name="point"/> onto the rotated grid.<br/>
+        /// For world aligned grid snapping use <b><see cref="SnapToGrid(FlaxEngine.Vector3,FlaxEngine.Vector3)"/></b> instead.
+        /// <example><para><b>Example code:</b></para>
+        /// <code>
+        /// <see langword="public" /> <see langword="class" /> SnapToGridExample : <see cref="Script"/><br/>
+        ///     <see langword="public" /> <see cref="Vector3"/> GridSize = <see cref="Vector3.One"/> * 20.0f;<br/>
+        ///     <see langword="public" /> <see cref="Actor"/> RayOrigin;<br/>
+        ///     <see langword="public" /> <see cref="Actor"/> SomeObject;<br/>
+        ///     <see langword="public" /> <see langword="override" /> <see langword="void" /> <see cref="Script.OnFixedUpdate"/><br/>
+        ///     {<br/>
+        ///         <see langword="if" /> (<see cref="Physics"/>.RayCast(RayOrigin.Position, RayOrigin.Transform.Forward, out <see cref="RayCastHit"/> hit)
+        ///         {<br/>
+        ///             <see cref="Vector3"/> position = hit.Collider.Position;
+        ///             <see cref="FlaxEngine.Transform"/> transform = hit.Collider.Transform;
+        ///             <see cref="Vector3"/> point = hit.Point;
+        ///             <see cref="Vector3"/> normal = hit.Normal;
+        ///             //Get rotation from normal relative to collider transform
+        ///             <see cref="Quaternion"/> rot = <see cref="Quaternion"/>.GetRotationFromNormal(normal, transform);
+        ///             point = <see cref="Vector3"/>.SnapToGrid(point, GridSize, rot, position);
+        ///             SomeObject.Position = point;
+        ///         }
+        ///     }
+        /// }
+        /// </code>
+        /// </example>
+        /// </summary>
+        /// <param name="point">The position to snap.</param>
+        /// <param name="gridSize">The size of the grid.</param>
+        /// <param name="gridOrientation">The rotation of the grid.</param>
+        /// <param name="gridOrigin">The center point of the grid.</param>
+        /// <param name="offset">The local position offset applied to the snapped position before grid rotation.</param>
+        /// <returns>The position snapped to the grid.</returns>
+        public static Vector3 SnapToGrid(Vector3 point, Vector3 gridSize, Quaternion gridOrientation, Vector3 gridOrigin, Vector3 offset)
+        {
+            return ((SnapToGrid(point - gridOrigin, gridSize) * gridOrientation.Conjugated() + offset) * gridOrientation) + gridOrigin;
         }
 
         /// <summary>

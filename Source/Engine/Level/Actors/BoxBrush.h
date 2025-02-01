@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -90,7 +90,7 @@ public:
     /// <summary>
     /// Gets the brush proxies per surface.
     /// </summary>
-    API_PROPERTY(Attributes="Serialize, EditorOrder(100), EditorDisplay(\"Surfaces\", EditorDisplayAttribute.InlineStyle), Collection(CanReorderItems = false, NotNullItems = true, ReadOnly = true)")
+    API_PROPERTY(Attributes="Serialize, EditorOrder(100), EditorDisplay(\"Surfaces\", EditorDisplayAttribute.InlineStyle), Collection(CanReorderItems = false, NotNullItems = true, CanResize = true)")
     Array<BrushSurface> GetSurfaces() const;
 
     /// <summary>

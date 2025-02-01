@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -32,7 +32,7 @@ public:
     /// <param name="data">The surface graph data.</param>
     /// <param name="info">The material info structure.</param>
     /// <returns>True if cannot save it, otherwise false.</returns>
-    API_FUNCTION() bool SaveSurface(BytesContainer& data, const MaterialInfo& info);
+    API_FUNCTION() bool SaveSurface(const BytesContainer& data, const MaterialInfo& info);
 
 #endif
 

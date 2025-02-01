@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "BehaviorKnowledge.h"
 #include "BehaviorTree.h"
@@ -212,7 +212,7 @@ bool BehaviorKnowledge::HasGoal(ScriptingTypeHandle type) const
     return false;
 }
 
-Variant BehaviorKnowledge::GetGoal(ScriptingTypeHandle type)
+const Variant& BehaviorKnowledge::GetGoal(ScriptingTypeHandle type) const
 {
     for (const Variant& goal : Goals)
     {

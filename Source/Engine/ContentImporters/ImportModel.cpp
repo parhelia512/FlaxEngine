@@ -1,10 +1,11 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "ImportModel.h"
 
 #if COMPILE_WITH_ASSETS_IMPORTER
 
 #include "Engine/Core/Log.h"
+#include "Engine/Core/Cache.h"
 #include "Engine/Core/Collections/Sorting.h"
 #include "Engine/Core/Collections/ArrayExtensions.h"
 #include "Engine/Serialization/MemoryWriteStream.h"
@@ -15,6 +16,7 @@
 #include "Engine/Content/Storage/ContentStorageManager.h"
 #include "Engine/Content/Assets/Animation.h"
 #include "Engine/Content/Content.h"
+#include "Engine/Animations/AnimEvent.h"
 #include "Engine/Level/Actors/EmptyActor.h"
 #include "Engine/Level/Actors/StaticModel.h"
 #include "Engine/Level/Prefabs/Prefab.h"
@@ -69,10 +71,10 @@ void RepackMeshLightmapUVs(ModelData& data)
     auto& lod = data.LODs[lodIndex];
 
     // Build list of meshes with their area
-    struct LightmapUVsPack : RectPack<LightmapUVsPack, float>
+    struct LightmapUVsPack : RectPackNode<float>
     {
-        LightmapUVsPack(float x, float y, float width, float height)
-            : RectPack<LightmapUVsPack, float>(x, y, width, height)
+        LightmapUVsPack(Size x, Size y, Size width, Size height)
+            : RectPackNode(x, y, width, height)
         {
         }
 
@@ -108,10 +110,11 @@ void RepackMeshLightmapUVs(ModelData& data)
         {
             bool failed = false;
             const float chartsPadding = (4.0f / 256.0f) * atlasSize;
-            LightmapUVsPack root(chartsPadding, chartsPadding, atlasSize - chartsPadding, atlasSize - chartsPadding);
+            RectPackAtlas<LightmapUVsPack> atlas;
+            atlas.Init(atlasSize, atlasSize, chartsPadding);
             for (auto& entry : entries)
             {
-                entry.Slot = root.Insert(entry.Size, entry.Size, chartsPadding);
+                entry.Slot = atlas.Insert(entry.Size, entry.Size);
                 if (entry.Slot == nullptr)
                 {
                     // Failed to insert surface, increase atlas size and try again
@@ -128,7 +131,7 @@ void RepackMeshLightmapUVs(ModelData& data)
                 for (const auto& entry : entries)
                 {
                     Float2 uvOffset(entry.Slot->X * atlasSizeInv, entry.Slot->Y * atlasSizeInv);
-                    Float2 uvScale((entry.Slot->Width - chartsPadding) * atlasSizeInv, (entry.Slot->Height - chartsPadding) * atlasSizeInv);
+                    Float2 uvScale(entry.Slot->Width * atlasSizeInv, entry.Slot->Height * atlasSizeInv);
                     // TODO: SIMD
                     for (auto& uv : entry.Mesh->LightmapUVs)
                     {
@@ -137,48 +140,6 @@ void RepackMeshLightmapUVs(ModelData& data)
                 }
                 break;
             }
-        }
-    }
-}
-
-void TryRestoreMaterials(CreateAssetContext& context, ModelData& modelData)
-{
-    // Skip if file is missing
-    if (!FileSystem::FileExists(context.TargetAssetPath))
-        return;
-
-    // Try to load asset that gets reimported
-    AssetReference<Asset> asset = Content::LoadAsync<Asset>(context.TargetAssetPath);
-    if (asset == nullptr)
-        return;
-    if (asset->WaitForLoaded())
-        return;
-
-    // Get model object
-    ModelBase* model = nullptr;
-    if (asset.Get()->GetTypeName() == Model::TypeName)
-    {
-        model = ((Model*)asset.Get());
-    }
-    else if (asset.Get()->GetTypeName() == SkinnedModel::TypeName)
-    {
-        model = ((SkinnedModel*)asset.Get());
-    }
-    if (!model)
-        return;
-
-    // Peek materials
-    for (int32 i = 0; i < modelData.Materials.Count(); i++)
-    {
-        auto& dstSlot = modelData.Materials[i];
-
-        if (model->MaterialSlots.Count() > i)
-        {
-            auto& srcSlot = model->MaterialSlots[i];
-
-            dstSlot.Name = srcSlot.Name;
-            dstSlot.ShadowsMode = srcSlot.ShadowsMode;
-            dstSlot.AssetID = srcSlot.Material.GetID();
         }
     }
 }
@@ -269,7 +230,7 @@ CreateAssetResult ImportModel::Import(CreateAssetContext& context)
 
         // Import all of the objects recursive but use current model data to skip loading file again
         options.Cached = &cached;
-        Function<bool(Options& splitOptions, const StringView& objectName, String& outputPath)> splitImport = [&context, &autoImportOutput](Options& splitOptions, const StringView& objectName, String& outputPath)
+        Function<bool(Options& splitOptions, const StringView& objectName, String& outputPath, MeshData* meshData)> splitImport = [&context, &autoImportOutput](Options& splitOptions, const StringView& objectName, String& outputPath, MeshData* meshData)
         {
             // Recursive importing of the split object
             String postFix = objectName;
@@ -279,6 +240,33 @@ CreateAssetResult ImportModel::Import(CreateAssetContext& context)
             // TODO: check for name collisions with material/texture assets
             outputPath = autoImportOutput / String(StringUtils::GetFileNameWithoutExtension(context.TargetAssetPath)) + TEXT(" ") + postFix + TEXT(".flax");
             splitOptions.SubAssetFolder = TEXT(" "); // Use the same folder as asset as they all are imported to the subdir for the prefab (see SubAssetFolder usage above)
+
+            if (splitOptions.Type == ModelTool::ModelType::Model && meshData)
+            {
+                // These settings interfere with submesh reimporting
+                splitOptions.CenterGeometry = false;
+                splitOptions.UseLocalOrigin = false;
+
+                // This properly sets the transformation of the mesh during reimport
+                auto* nodes = &splitOptions.Cached->Data->Nodes;
+                Vector3 scale = Vector3::One;
+
+                // TODO: Improve this hack.
+                // This is the same hack as in ImportModel::CreatePrefab(), and it is documented further there
+                auto* currentNode = &(*nodes)[meshData->NodeIndex];
+                while (true)
+                {
+                    if (currentNode->ParentIndex == -1)
+                    {
+                        scale *= currentNode->LocalTransform.Scale;
+                        break;
+                    }
+                    currentNode = &(*nodes)[currentNode->ParentIndex];
+                }
+
+                splitOptions.Translation = meshData->OriginTranslation * scale * -1.0f;
+            }
+
             return AssetsImportingManager::Import(context.InputPath, outputPath, &splitOptions);
         };
         auto splitOptions = options;
@@ -294,7 +282,7 @@ CreateAssetResult ImportModel::Import(CreateAssetContext& context)
 
             splitOptions.Type = ModelTool::ModelType::Model;
             splitOptions.ObjectIndex = groupIndex;
-            if (!splitImport(splitOptions, group.GetKey(), prefabObject.AssetPath))
+            if (!splitImport(splitOptions, group.GetKey(), prefabObject.AssetPath, group.First()))
             {
                 prefabObjects.Add(prefabObject);
             }
@@ -305,7 +293,7 @@ CreateAssetResult ImportModel::Import(CreateAssetContext& context)
             auto& animation = data->Animations[i];
             splitOptions.Type = ModelTool::ModelType::Animation;
             splitOptions.ObjectIndex = i;
-            splitImport(splitOptions, animation.Name, prefabObject.AssetPath);
+            splitImport(splitOptions, animation.Name, prefabObject.AssetPath, nullptr);
         }
     }
     else if (options.SplitObjects)
@@ -361,7 +349,7 @@ CreateAssetResult ImportModel::Import(CreateAssetContext& context)
         auto& group = meshesByName[options.ObjectIndex];
         if (&dataThis == data)
         {
-            // Use meshes only from the the grouping (others will be removed manually)
+            // Use meshes only from the grouping (others will be removed manually)
             {
                 auto& lod = dataThis.LODs[0];
                 meshesToDelete.Add(lod.Meshes);
@@ -431,10 +419,62 @@ CreateAssetResult ImportModel::Import(CreateAssetContext& context)
         data = &dataThis;
     }
 
-    // Check if restore materials on model reimport
-    if (options.RestoreMaterialsOnReimport && data->Materials.HasItems())
+    // Check if restore local changes on asset reimport
+    constexpr bool RestoreAnimEventsOnReimport = true;
+    const bool restoreMaterials = options.RestoreMaterialsOnReimport && data->Materials.HasItems();
+    const bool restoreAnimEvents = RestoreAnimEventsOnReimport && options.Type == ModelTool::ModelType::Animation && data->Animations.HasItems();
+    if ((restoreMaterials || restoreAnimEvents) && FileSystem::FileExists(context.TargetAssetPath))
     {
-        TryRestoreMaterials(context, *data);
+        AssetReference<Asset> asset = Content::LoadAsync<Asset>(context.TargetAssetPath);
+        if (asset && !asset->WaitForLoaded())
+        {
+            auto* model = ScriptingObject::Cast<ModelBase>(asset);
+            auto* animation = ScriptingObject::Cast<Animation>(asset);
+            if (restoreMaterials && model)
+            {
+                // Copy material settings
+                for (int32 i = 0; i < data->Materials.Count(); i++)
+                {
+                    auto& dstSlot = data->Materials[i];
+                    if (model->MaterialSlots.Count() > i)
+                    {
+                        auto& srcSlot = model->MaterialSlots[i];
+                        dstSlot.Name = srcSlot.Name;
+                        dstSlot.ShadowsMode = srcSlot.ShadowsMode;
+                        dstSlot.AssetID = srcSlot.Material.GetID();
+                    }
+                }
+            }
+            if (restoreAnimEvents && animation)
+            {
+                // Copy anim event tracks
+                for (const auto& e : animation->Events)
+                {
+                    auto& clone = data->Animations[0].Events.AddOne();
+                    clone.First = e.First;
+                    const auto& eKeys = e.Second.GetKeyframes();
+                    auto& cloneKeys = clone.Second.GetKeyframes();
+                    clone.Second.Resize(eKeys.Count());
+                    for (int32 i = 0; i < eKeys.Count(); i++)
+                    {
+                        const auto& eKey = eKeys[i];
+                        auto& cloneKey = cloneKeys[i];
+                        cloneKey.Time = eKey.Time;
+                        cloneKey.Value.Duration = eKey.Value.Duration;
+                        if (eKey.Value.Instance)
+                        {
+                            cloneKey.Value.TypeName = eKey.Value.Instance->GetType().Fullname;
+                            rapidjson_flax::StringBuffer buffer;
+                            CompactJsonWriter writer(buffer);
+                            writer.StartObject();
+                            eKey.Value.Instance->Serialize(writer, nullptr);
+                            writer.EndObject();
+                            cloneKey.Value.JsonData.Set(buffer.GetString(), (int32)buffer.GetSize());
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // When using generated lightmap UVs those coordinates needs to be moved so all meshes are in unique locations in [0-1]x[0-1] coordinates space
@@ -600,7 +640,17 @@ CreateAssetResult ImportModel::CreateAnimation(CreateAssetContext& context, Mode
 
     // Save animation data
     MemoryWriteStream stream(8182);
-    const int32 animIndex = options && options->ObjectIndex != -1 ? options->ObjectIndex : 0; // Single animation per asset
+    int32 animIndex = options ? options->ObjectIndex : -1; // Single animation per asset
+    if (animIndex == -1)
+    {
+        // Pick the longest animation by default (eg. to skip ref pose anim if exported as the first one)
+        animIndex = 0;
+        for (int32 i = 1; i < modelData.Animations.Count(); i++)
+        {
+            if (modelData.Animations[i].GetLength() > modelData.Animations[animIndex].GetLength())
+                animIndex = i;
+        }
+    }
     if (modelData.Pack2AnimationHeader(&stream, animIndex))
         return CreateAssetResult::Error;
     if (context.AllocateChunk(0))
@@ -665,7 +715,42 @@ CreateAssetResult ImportModel::CreatePrefab(CreateAssetContext& context, ModelDa
         // Setup node in hierarchy
         nodeToActor.Add(nodeIndex, nodeActor);
         nodeActor->SetName(node.Name);
-        nodeActor->SetLocalTransform(node.LocalTransform);
+
+        // When use local origin is checked, it shifts everything over the same amount, including the root. This tries to work around that.
+        if (!(nodeIndex == 0 && options.UseLocalOrigin))
+        {
+            // TODO: Improve this hack.
+            // Assimp importer has the meter -> centimeter conversion scale applied to the local transform of
+            // the root node, and only the root node. The OpenFBX importer has the same scale applied
+            // to each node, *except* the root node. This difference makes it hard to calculate the
+            // global scale properly. Position offsets are not calculated properly from Assimp without summing up
+            // the global scale because translations from Assimp don't get scaled with the global scaler option,
+            // but the OpenFBX importer does scale them. So this hack will end up only applying the global scale
+            // change if its using Assimp due to the difference in where the nodes' local transform scales are set.
+            auto* currentNode = &node;
+            Vector3 scale = Vector3::One;
+            while (true)
+            {
+                if (currentNode->ParentIndex == -1)
+                {
+                    scale *= currentNode->LocalTransform.Scale;
+                    break;
+                }
+                currentNode = &data.Nodes[currentNode->ParentIndex];
+            }
+
+            // Only set translation, since scale and rotation is applied earlier.
+            Transform positionOffset = Transform::Identity;
+            positionOffset.Translation = node.LocalTransform.Translation * scale;
+
+            if (options.UseLocalOrigin)
+            {
+                positionOffset.Translation += data.Nodes[0].LocalTransform.Translation;
+            }
+
+            nodeActor->SetLocalTransform(positionOffset);
+        }
+
         if (nodeIndex == 0)
         {
             // Special case for root actor to link any unlinked nodes
@@ -682,6 +767,7 @@ CreateAssetResult ImportModel::CreatePrefab(CreateAssetContext& context, ModelDa
         // Link with object from prefab (if reimporting)
         if (prefab)
         {
+            rapidjson_flax::StringBuffer buffer;
             for (Actor* a : nodeActors)
             {
                 for (const auto& i : prefab->ObjectsCache)
@@ -691,6 +777,32 @@ CreateAssetResult ImportModel::CreatePrefab(CreateAssetContext& context, ModelDa
                     auto* o = (Actor*)i.Value;
                     if (o->GetName() != a->GetName()) // Name match
                         continue;
+
+                    // Preserve local changes made in the prefab
+                    {
+                        // Serialize
+                        buffer.Clear();
+                        CompactJsonWriter writer(buffer);
+                        writer.StartObject();
+                        const void* defaultInstance = o->GetType().GetDefaultInstance();
+                        o->Serialize(writer, defaultInstance);
+                        writer.EndObject();
+
+                        // Parse json
+                        rapidjson_flax::Document document;
+                        document.Parse(buffer.GetString(), buffer.GetSize());
+
+                        // Strip unwanted data
+                        document.RemoveMember("ID");
+                        document.RemoveMember("ParentID");
+                        document.RemoveMember("PrefabID");
+                        document.RemoveMember("PrefabObjectID");
+                        document.RemoveMember("Name");
+
+                        // Deserialize object
+                        auto modifier = Cache::ISerializeModifier.Get();
+                        a->Deserialize(document, &*modifier);
+                    }
 
                     // Mark as this object already exists in prefab so will be preserved when updating it
                     a->LinkPrefab(o->GetPrefabID(), o->GetPrefabObjectID());

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -26,6 +26,7 @@ public:
 
     bool GetPixels(Array<Color32>& pixels, int32 width, int32 height, PixelFormat format) const;
     bool GetPixels(Array<Color>& pixels, int32 width, int32 height, PixelFormat format) const;
+    void Copy(void* data, uint32 dataRowPitch, uint32 dataDepthPitch, uint32 dataDepthSlices, uint32 targetRowPitch);
 
     template<typename T>
     T& Get(int32 x, int32 y)

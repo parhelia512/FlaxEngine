@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -240,6 +240,10 @@ public:
         /// <summary>
         /// The object sorting key.
         /// </summary>
-        int16 SortOrder;
+        int8 SortOrder;
+
+#if USE_EDITOR
+        float LightmapScale = -1.0f;
+#endif
     };
 };
