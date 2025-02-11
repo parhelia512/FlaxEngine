@@ -1,10 +1,11 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 namespace FlaxEngine.GUI
 {
     /// <summary>
     /// Text box control which can gather text input from the user.
     /// </summary>
+    [ActorToolbox("GUI")]
     public class TextBox : TextBoxBase
     {
         private TextLayoutOptions _layout;
@@ -25,9 +26,59 @@ namespace FlaxEngine.GUI
         }
 
         /// <summary>
+        /// Whether to Obfuscate the text with a different character.
+        /// </summary>
+        [EditorOrder(21), Tooltip("Whether to Obfuscate the text with a different character.")]
+        public bool ObfuscateText = false;
+
+        /// <summary>
+        /// The character to Obfuscate the text.
+        /// </summary>
+        [EditorOrder(22), VisibleIf(nameof(ObfuscateText)), Tooltip("The character to Obfuscate the text.")]
+        public char ObfuscateCharacter = '\u25cf';
+        
+        /// <summary>
+        /// The text case.
+        /// </summary>
+        [EditorDisplay("Text Style"), EditorOrder(2000), Tooltip("The case of the text.")]
+        public TextCaseOptions CaseOption { get; set; } = TextCaseOptions.None;
+
+        /// <summary>
+        /// Whether to bold the text.
+        /// </summary>
+        [EditorDisplay("Text Style"), EditorOrder(2001), Tooltip("Bold the text.")]
+        public bool Bold { get; set; } = false;
+
+        /// <summary>
+        /// Whether to italicize the text.
+        /// </summary>
+        [EditorDisplay("Text Style"), EditorOrder(2002), Tooltip("Italicize the text.")]
+        public bool Italic { get; set; } = false;
+
+        /// <summary>
+        /// The vertical alignment of the text.
+        /// </summary>
+        [EditorDisplay("Text Style"), EditorOrder(2023), Tooltip("The vertical alignment of the text.")]
+        public TextAlignment VerticalAlignment
+        {
+            get => _layout.VerticalAlignment;
+            set => _layout.VerticalAlignment = value;
+        }
+        
+        /// <summary>
+        /// The vertical alignment of the text.
+        /// </summary>
+        [EditorDisplay("Text Style"), EditorOrder(2024), Tooltip("The horizontal alignment of the text.")]
+        public TextAlignment HorizontalAlignment
+        {
+            get => _layout.HorizontalAlignment;
+            set => _layout.HorizontalAlignment = value;
+        }
+
+        /// <summary>
         /// Gets or sets the text wrapping within the control bounds.
         /// </summary>
-        [EditorDisplay("Text Style"), EditorOrder(2023), Tooltip("The text wrapping within the control bounds.")]
+        [EditorDisplay("Text Style"), EditorOrder(2025), Tooltip("The text wrapping within the control bounds.")]
         public TextWrapping Wrapping
         {
             get => _layout.TextWrapping;
@@ -37,13 +88,13 @@ namespace FlaxEngine.GUI
         /// <summary>
         /// Gets or sets the font.
         /// </summary>
-        [EditorDisplay("Text Style"), EditorOrder(2024)]
+        [EditorDisplay("Text Style"), EditorOrder(2026)]
         public FontReference Font { get; set; }
 
         /// <summary>
         /// Gets or sets the custom material used to render the text. It must has domain set to GUI and have a public texture parameter named Font used to sample font atlas texture with font characters data.
         /// </summary>
-        [EditorDisplay("Text Style"), EditorOrder(2025), Tooltip("Custom material used to render the text. It must has domain set to GUI and have a public texture parameter named Font used to sample font atlas texture with font characters data.")]
+        [EditorDisplay("Text Style"), EditorOrder(2027), Tooltip("Custom material used to render the text. It must has domain set to GUI and have a public texture parameter named Font used to sample font atlas texture with font characters data.")]
         public MaterialBase TextMaterial { get; set; }
 
         /// <summary>
@@ -97,19 +148,49 @@ namespace FlaxEngine.GUI
         /// <inheritdoc />
         public override Float2 GetTextSize()
         {
-            var font = Font.GetFont();
+            var font = GetFont();
             if (font == null)
             {
                 return Float2.Zero;
             }
 
-            return font.MeasureText(_text, ref _layout);
+            return font.MeasureText(ConvertedText(), ref _layout);
+        }
+        
+        private Font GetFont()
+        {
+            Font font;
+            if (Bold)
+                font = Italic ? Font.GetBold().GetItalic().GetFont() : Font.GetBold().GetFont();
+            else if (Italic)
+                font = Font.GetItalic().GetFont();
+            else
+                font = Font.GetFont();
+            return font;
+        }
+
+        private string ConvertedText()
+        {
+            if (ObfuscateText)
+                return new string(ObfuscateCharacter, _text.Length);
+
+            string text = _text;
+            switch (CaseOption)
+            {
+            case TextCaseOptions.Uppercase:
+                text = text.ToUpper();
+                break;
+            case TextCaseOptions.Lowercase:
+                text = text.ToLower();
+                break;
+            }
+            return text;
         }
 
         /// <inheritdoc />
         public override Float2 GetCharPosition(int index, out float height)
         {
-            var font = Font.GetFont();
+            var font = GetFont();
             if (font == null)
             {
                 height = Height;
@@ -117,19 +198,19 @@ namespace FlaxEngine.GUI
             }
 
             height = font.Height / DpiScale;
-            return font.GetCharPosition(_text, index, ref _layout);
+            return font.GetCharPosition(ConvertedText(), index, ref _layout);
         }
 
         /// <inheritdoc />
         public override int HitTestText(Float2 location)
         {
-            var font = Font.GetFont();
+            var font = GetFont();
             if (font == null)
             {
                 return 0;
             }
 
-            return font.HitTestText(_text, location, ref _layout);
+            return font.HitTestText(ConvertedText(), location, ref _layout);
         }
 
         /// <inheritdoc />
@@ -146,7 +227,7 @@ namespace FlaxEngine.GUI
             // Cache data
             var rect = new Rectangle(Float2.Zero, Size);
             bool enabled = EnabledInHierarchy;
-            var font = Font.GetFont();
+            var font = GetFont();
             if (!font)
                 return;
 
@@ -165,19 +246,22 @@ namespace FlaxEngine.GUI
             if (useViewOffset)
                 Render2D.PushTransform(Matrix3x3.Translation2D(-_viewOffset));
 
+            var text = ConvertedText();
+
             // Check if sth is selected to draw selection
-            if (HasSelection)
+            if (HasSelection && IsFocused)
             {
-                var leftEdge = font.GetCharPosition(_text, SelectionLeft, ref _layout);
-                var rightEdge = font.GetCharPosition(_text, SelectionRight, ref _layout);
-                float fontHeight = font.Height / DpiScale;
+                var leftEdge = font.GetCharPosition(text, SelectionLeft, ref _layout);
+                var rightEdge = font.GetCharPosition(text, SelectionRight, ref _layout);
+                var fontHeight = font.Height;
+                var textHeight = fontHeight / DpiScale;
 
                 // Draw selection background
                 float alpha = Mathf.Min(1.0f, Mathf.Cos(_animateTime * BackgroundSelectedFlashSpeed) * 0.5f + 1.3f);
                 alpha *= alpha;
                 Color selectionColor = SelectionColor * alpha;
                 //
-                int selectedLinesCount = 1 + Mathf.FloorToInt((rightEdge.Y - leftEdge.Y) / fontHeight);
+                int selectedLinesCount = 1 + Mathf.FloorToInt((rightEdge.Y - leftEdge.Y) / textHeight);
                 if (selectedLinesCount == 1)
                 {
                     // Selected is part of single line
@@ -194,7 +278,7 @@ namespace FlaxEngine.GUI
                     //
                     for (int i = 3; i <= selectedLinesCount; i++)
                     {
-                        leftEdge.Y += fontHeight;
+                        leftEdge.Y += textHeight;
                         Rectangle r = new Rectangle(leftMargin, leftEdge.Y, 1000000000, fontHeight);
                         Render2D.FillRectangle(r, selectionColor);
                     }
@@ -205,14 +289,16 @@ namespace FlaxEngine.GUI
             }
 
             // Text or watermark
-            if (_text.Length > 0)
+            if (text.Length > 0)
             {
                 var color = TextColor;
                 if (!enabled)
                     color *= 0.6f;
-                Render2D.DrawText(font, _text, color, ref _layout, TextMaterial);
+                else if (_isReadOnly)
+                    color *= 0.85f;
+                Render2D.DrawText(font, text, color, ref _layout, TextMaterial);
             }
-            else if (!string.IsNullOrEmpty(_watermarkText) && !IsFocused)
+            else if (!string.IsNullOrEmpty(_watermarkText))
             {
                 Render2D.DrawText(font, _watermarkText, WatermarkTextColor, ref _layout, TextMaterial);
             }

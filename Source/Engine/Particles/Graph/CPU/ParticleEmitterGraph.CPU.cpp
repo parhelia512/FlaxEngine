@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "ParticleEmitterGraph.CPU.h"
 #include "Engine/Core/Collections/Sorting.h"
@@ -8,7 +8,7 @@
 #include "Engine/Engine/Time.h"
 #include "Engine/Profiler/ProfilerCPU.h"
 
-ThreadLocal<ParticleEmitterGraphCPUContext> ParticleEmitterGraphCPUExecutor::Context;
+ThreadLocal<ParticleEmitterGraphCPUContext*> ParticleEmitterGraphCPUExecutor::Context;
 
 namespace
 {
@@ -122,7 +122,10 @@ ParticleEmitterGraphCPUExecutor::ParticleEmitterGraphCPUExecutor(ParticleEmitter
 
 void ParticleEmitterGraphCPUExecutor::Init(ParticleEmitter* emitter, ParticleEffect* effect, ParticleEmitterInstance& data, float dt)
 {
-    auto& context = Context.Get();
+    auto& contextPtr = Context.Get();
+    if (!contextPtr)
+        contextPtr = New<ParticleEmitterGraphCPUContext>();
+    auto& context = *contextPtr;
     context.GraphStack.Clear();
     context.GraphStack.Push(&_graph);
     context.Data = &data;
@@ -252,8 +255,8 @@ bool ParticleEmitterGraphCPUExecutor::ComputeBounds(ParticleEmitter* emitter, Pa
             case 401:
             {
                 // Prepare graph data
-                auto& context = Context.Get();
                 Init(emitter, effect, data);
+                auto& context = *Context.Get();
 
                 // Find the maximum radius of the particle light
                 float maxRadius = 0.0f;
@@ -377,7 +380,7 @@ void ParticleEmitterGraphCPUExecutor::Draw(ParticleEmitter* emitter, ParticleEff
 
     // Prepare graph data
     Init(emitter, effect, data);
-    auto& context = Context.Get();
+    auto& context = *Context.Get();
 
     // Draw lights
     for (int32 moduleIndex = 0; moduleIndex < emitter->Graph.LightModules.Count(); moduleIndex++)
@@ -385,10 +388,12 @@ void ParticleEmitterGraphCPUExecutor::Draw(ParticleEmitter* emitter, ParticleEff
         const auto module = emitter->Graph.LightModules[moduleIndex];
         ASSERT(module->TypeID == 401);
 
-        RendererPointLightData lightData;
+        RenderPointLightData lightData;
         lightData.MinRoughness = 0.04f;
         lightData.ShadowsDistance = 2000.0f;
-        lightData.ShadowsStrength = 1.0f;
+        lightData.ShadowsStrength = 0.0f;
+        lightData.ShadowsUpdateRate = 1.0f;
+        lightData.ShadowsUpdateRateAtDistance = 0.5f;
         lightData.Direction = Float3::Forward;
         lightData.ShadowsFadeDistance = 50.0f;
         lightData.ShadowsNormalOffsetScale = 10.0f;
@@ -396,12 +401,6 @@ void ParticleEmitterGraphCPUExecutor::Draw(ParticleEmitter* emitter, ParticleEff
         lightData.ShadowsSharpness = 1.0f;
         lightData.UseInverseSquaredFalloff = false;
         lightData.VolumetricScatteringIntensity = 1.0f;
-        lightData.CastVolumetricShadow = false;
-        lightData.RenderedVolumetricFog = 0;
-        lightData.ShadowsMode = ShadowsCastingMode::None;
-        lightData.SourceRadius = 0.0f;
-        lightData.SourceLength = 0.0f;
-        lightData.IESTexture = nullptr;
 
         for (int32 particleIndex = 0; particleIndex < count; particleIndex++)
         {
@@ -506,7 +505,8 @@ void ParticleEmitterGraphCPUExecutor::Update(ParticleEmitter* emitter, ParticleE
     }
 
     // Spawn particles
-    int32 spawnCount = 0;
+    int32 spawnCount = data.CustomSpawnCount;
+    data.CustomSpawnCount = 0;
     if (canSpawn)
     {
         PROFILE_CPU_NAMED("Spawn");
@@ -571,11 +571,11 @@ int32 ParticleEmitterGraphCPUExecutor::UpdateSpawn(ParticleEmitter* emitter, Par
     PROFILE_CPU_NAMED("Spawn");
 
     // Prepare data
-    auto& context = Context.Get();
     Init(emitter, effect, data, dt);
 
     // Spawn particles
-    int32 spawnCount = 0;
+    int32 spawnCount = data.CustomSpawnCount;
+    data.CustomSpawnCount = 0;
     for (int32 i = 0; i < _graph.SpawnModules.Count(); i++)
     {
         spawnCount += ProcessSpawnModule(i);
@@ -587,7 +587,7 @@ int32 ParticleEmitterGraphCPUExecutor::UpdateSpawn(ParticleEmitter* emitter, Par
 VisjectExecutor::Value ParticleEmitterGraphCPUExecutor::eatBox(Node* caller, Box* box)
 {
     // Check if graph is looped or is too deep
-    auto& context = Context.Get();
+    auto& context = *Context.Get();
     if (context.CallStackSize >= PARTICLE_EMITTER_MAX_CALL_STACK)
     {
         OnError(caller, box, TEXT("Graph is looped or too deep!"));
@@ -618,6 +618,6 @@ VisjectExecutor::Value ParticleEmitterGraphCPUExecutor::eatBox(Node* caller, Box
 
 VisjectExecutor::Graph* ParticleEmitterGraphCPUExecutor::GetCurrentGraph() const
 {
-    auto& context = Context.Get();
+    auto& context = *Context.Get();
     return (Graph*)context.GraphStack.Peek();
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -52,7 +52,7 @@ public:
     /// <summary>
     /// Gets the joint mode flags. Controls joint behaviour.
     /// </summary>
-    API_PROPERTY(Attributes="EditorOrder(100), DefaultValue(DistanceJointFlag.MinDistance | DistanceJointFlag.MaxDistance)")
+    API_PROPERTY(Attributes="EditorOrder(100), EditorDisplay(\"Joint\"), DefaultValue(DistanceJointFlag.MinDistance | DistanceJointFlag.MaxDistance)")
     FORCE_INLINE DistanceJointFlag GetFlags() const
     {
         return _flags;
@@ -67,7 +67,7 @@ public:
     /// Gets the allowed minimum distance for the joint.
     /// </summary>
     /// <remarks>Used only when DistanceJointFlag.MinDistance flag is set. The minimum distance must be no more than the maximum distance. Default: 0, Range: [0, float.MaxValue].</remarks>
-    API_PROPERTY(Attributes="EditorOrder(110), DefaultValue(0.0f), Limit(0.0f), EditorDisplay(\"Joint\")")
+    API_PROPERTY(Attributes="EditorOrder(110), DefaultValue(0.0f), Limit(0.0f), EditorDisplay(\"Joint\"), ValueCategory(Utils.ValueCategory.Distance)")
     FORCE_INLINE float GetMinDistance() const
     {
         return _minDistance;
@@ -83,7 +83,7 @@ public:
     /// Gets the allowed maximum distance for the joint.
     /// </summary>
     /// <remarks>Used only when DistanceJointFlag.MaxDistance flag is set. The maximum distance must be no less than the minimum distance. Default: 0, Range: [0, float.MaxValue].</remarks>
-    API_PROPERTY(Attributes="EditorOrder(120), DefaultValue(10.0f), Limit(0.0f), EditorDisplay(\"Joint\")")
+    API_PROPERTY(Attributes="EditorOrder(120), DefaultValue(10.0f), Limit(0.0f), EditorDisplay(\"Joint\"), ValueCategory(Utils.ValueCategory.Distance)")
     FORCE_INLINE float GetMaxDistance() const
     {
         return _maxDistance;

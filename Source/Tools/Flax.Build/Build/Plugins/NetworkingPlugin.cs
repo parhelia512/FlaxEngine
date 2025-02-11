@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Text;
@@ -802,8 +802,11 @@ namespace Flax.Build.Plugins
             // Serialize base type
             if (type.BaseType != null && type.BaseType.FullName != "System.ValueType" && type.BaseType.FullName != "FlaxEngine.Object" && type.BaseType.CanBeResolved())
             {
-                GenerateSerializeCallback(module, il, type.BaseType.Resolve(), serialize);
+                GenerateSerializeCallback(module, il, type.BaseType, serialize);
             }
+
+            if (type.HasGenericParameters) // TODO: implement network replication for generic classes
+                MonoCecil.CompilationError($"Not supported generic type '{type.FullName}' for network replication.");
 
             var ildContext = new DotnetIlContext(il);
 
@@ -836,10 +839,11 @@ namespace Flax.Build.Plugins
             module.GetType("System.IntPtr", out var intPtrType);
             module.GetType("FlaxEngine.Object", out var scriptingObjectType);
             var fromUnmanagedPtr = scriptingObjectType.Resolve().GetMethod("FromUnmanagedPtr");
+            TypeReference intPtr = module.ImportReference(intPtrType);
 
             var m = new MethodDefinition(name + "Native", MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.HideBySig, context.VoidType);
-            m.Parameters.Add(new ParameterDefinition("instancePtr", ParameterAttributes.None, intPtrType));
-            m.Parameters.Add(new ParameterDefinition("streamPtr", ParameterAttributes.None, intPtrType));
+            m.Parameters.Add(new ParameterDefinition("instancePtr", ParameterAttributes.None, intPtr));
+            m.Parameters.Add(new ParameterDefinition("streamPtr", ParameterAttributes.None, intPtr));
             TypeReference networkStream = module.ImportReference(context.NetworkStreamType);
             ILProcessor il = m.Body.GetILProcessor();
             il.Emit(OpCodes.Nop);
@@ -874,12 +878,13 @@ namespace Flax.Build.Plugins
             return m;
         }
 
-        private static void GenerateSerializeCallback(ModuleDefinition module, ILProcessor il, TypeDefinition type, bool serialize)
+        private static void GenerateSerializeCallback(ModuleDefinition module, ILProcessor il, TypeReference type, bool serialize)
         {
             if (type.IsScriptingObject())
             {
                 // NetworkReplicator.InvokeSerializer(typeof(<type>), instance, stream, <serialize>)
-                il.Emit(OpCodes.Ldtoken, module.ImportReference(type));
+                module.ImportReference(type);
+                il.Emit(OpCodes.Ldtoken, type);
                 module.GetType("System.Type", out var typeType);
                 var getTypeFromHandle = typeType.Resolve().GetMethod("GetTypeFromHandle");
                 il.Emit(OpCodes.Call, module.ImportReference(getTypeFromHandle));
@@ -1585,14 +1590,18 @@ namespace Flax.Build.Plugins
                 context.Failed = true;
                 return;
             }
-
             if (method.IsVirtual)
             {
                 MonoCecil.CompilationError($"Not supported virtual RPC method '{method.FullName}'.", method);
                 context.Failed = true;
                 return;
             }
-
+            if (method.CustomAttributes.FirstOrDefault(x => x.AttributeType.FullName == "System.Runtime.CompilerServices.AsyncStateMachineAttribute") != null)
+            {
+                MonoCecil.CompilationError($"Not supported async RPC method '{method.FullName}'.", method);
+                context.Failed = true;
+                return;
+            }
             ModuleDefinition module = type.Module;
             var voidType = module.TypeSystem.Void;
             if (method.ReturnType != voidType)
@@ -1601,7 +1610,6 @@ namespace Flax.Build.Plugins
                 context.Failed = true;
                 return;
             }
-
             if (method.IsStatic)
             {
                 MonoCecil.CompilationError($"Not supported static RPC method '{method.FullName}'.", method);
@@ -1629,7 +1637,6 @@ namespace Flax.Build.Plugins
                 context.Failed = true;
                 return;
             }
-
             if (!methodRPC.IsServer && !methodRPC.IsClient)
             {
                 MonoCecil.CompilationError($"Network RPC {method.Name} in {type.FullName} needs to have Server or Client specifier.", method);
@@ -1641,12 +1648,13 @@ namespace Flax.Build.Plugins
             module.GetType("FlaxEngine.Object", out var scriptingObjectType);
             var fromUnmanagedPtr = scriptingObjectType.Resolve().GetMethod("FromUnmanagedPtr");
             TypeReference networkStream = module.ImportReference(networkStreamType);
+            TypeReference intPtr = module.ImportReference(intPtrType);
 
             // Generate static method to execute RPC locally
             {
                 var m = new MethodDefinition(method.Name + "_Execute", MethodAttributes.Static | MethodAttributes.Assembly | MethodAttributes.HideBySig, voidType);
-                m.Parameters.Add(new ParameterDefinition("instancePtr", ParameterAttributes.None, intPtrType));
-                m.Parameters.Add(new ParameterDefinition("streamPtr", ParameterAttributes.None, module.ImportReference(intPtrType)));
+                m.Parameters.Add(new ParameterDefinition("instancePtr", ParameterAttributes.None, intPtr));
+                m.Parameters.Add(new ParameterDefinition("streamPtr", ParameterAttributes.None, intPtr));
                 ILProcessor ilp = m.Body.GetILProcessor();
                 var il = new DotnetIlContext(ilp, method);
                 il.Emit(OpCodes.Nop);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -178,6 +178,8 @@ namespace FlaxEditor.CustomEditors.Editors
                             return 1;
                         if (Info.MetadataToken < other.Info.MetadataToken)
                             return -1;
+                        // Keep declaration order if same metadata token.
+                        return 0;
                     }
 
                     // By name
@@ -474,32 +476,7 @@ namespace FlaxEditor.CustomEditors.Editors
             }
             if (layout.Editors.Count != 0)
             {
-                var sb = Clipboard.Text;
-                if (!string.IsNullOrEmpty(sb))
-                {
-                    try
-                    {
-                        var data = JsonSerializer.Deserialize<string[]>(sb);
-                        if (data == null || data.Length != layout.Editors.Count)
-                            return false;
-                        for (var i = 0; i < layout.Editors.Count; i++)
-                        {
-                            Clipboard.Text = data[i];
-                            if (!layout.Editors[i].CanPaste)
-                                return false;
-                        }
-                        return true;
-                    }
-                    catch
-                    {
-                        return false;
-                    }
-                    finally
-                    {
-                        Clipboard.Text = sb;
-                    }
-                }
-                return false;
+                return !string.IsNullOrEmpty(Clipboard.Text);
             }
             if (layout.Children.Any(x => x is LayoutElementsContainer))
             {
@@ -558,6 +535,15 @@ namespace FlaxEditor.CustomEditors.Editors
             _groupsPool.Add(groups);
         }
 
+        internal static GroupElement OnGroup(LayoutElementsContainer layout, string name)
+        {
+            // Add new group
+            var group = layout.Group(name);
+            group.Panel.Tag = group;
+            group.Panel.MouseButtonRightClicked += OnGroupPanelMouseButtonRightClicked;
+            return group;
+        }
+
         internal static LayoutElementsContainer OnGroup(LayoutElementsContainer layout, EditorDisplayAttribute display)
         {
             if (display?.Group != null)
@@ -581,56 +567,51 @@ namespace FlaxEditor.CustomEditors.Editors
             return layout;
         }
 
+        internal static void OnReadOnlyProperty(LayoutElementsContainer itemLayout, int labelIndex = -1)
+        {
+            PropertiesList list = null;
+            int firstChildControlIndex = 0;
+            bool disableSingle = true;
+            var control = itemLayout.Children[itemLayout.Children.Count - 1];
+            if (control is GroupElement group && group.Children.Count > 0)
+            {
+                list = (group.Children[0] as PropertiesListElement)?.Properties;
+                disableSingle = false; // Disable all nested editors
+            }
+            else if (control is PropertiesListElement list1 && labelIndex != -1)
+            {
+                list = list1.Labels[labelIndex].FirstChildControlContainer ?? list1.Properties;
+                firstChildControlIndex = list1.Labels[labelIndex].FirstChildControlIndex;
+            }
+            else if (control?.Control != null)
+            {
+                control.Control.Enabled = false;
+            }
+
+            if (list != null)
+            {
+                // Disable controls added to the editor
+                var count = list.Children.Count;
+                for (int j = firstChildControlIndex; j < count; j++)
+                {
+                    var child = list.Children[j];
+                    if (disableSingle && child is PropertyNameLabel)
+                        break;
+
+                    if (child != null)
+                        child.Enabled = false;
+                }
+            }
+        }
+
         /// <summary>
-        /// Spawns the property for the given item.
+        /// Evaluate the <see cref="VisibleIfAttribute"/> cache for a given property item.
         /// </summary>
         /// <param name="itemLayout">The item layout.</param>
-        /// <param name="itemValues">The item values.</param>
         /// <param name="item">The item.</param>
-        protected virtual void SpawnProperty(LayoutElementsContainer itemLayout, ValueContainer itemValues, ItemInfo item)
+        /// <param name="labelIndex">The label index.</param>
+        protected virtual void EvaluateVisibleIf(LayoutElementsContainer itemLayout, ItemInfo item, int labelIndex)
         {
-            int labelIndex = 0;
-            if ((item.IsReadOnly || item.VisibleIfs.Length > 0) &&
-                itemLayout.Children.Count > 0 &&
-                itemLayout.Children[itemLayout.Children.Count - 1] is PropertiesListElement propertiesListElement)
-            {
-                labelIndex = propertiesListElement.Labels.Count;
-            }
-
-            itemLayout.Property(item.DisplayName, itemValues, item.OverrideEditor, item.TooltipText);
-
-            if (item.IsReadOnly && itemLayout.Children.Count > 0)
-            {
-                PropertiesListElement list = null;
-                int firstChildControlIndex = 0;
-                bool disableSingle = true;
-                var control = itemLayout.Children[itemLayout.Children.Count - 1];
-                if (control is GroupElement group && group.Children.Count > 0)
-                {
-                    list = group.Children[0] as PropertiesListElement;
-                    disableSingle = false; // Disable all nested editors
-                }
-                else if (control is PropertiesListElement list1)
-                {
-                    list = list1;
-                    firstChildControlIndex = list.Labels[labelIndex].FirstChildControlIndex;
-                }
-
-                if (list != null)
-                {
-                    // Disable controls added to the editor
-                    var count = list.Properties.Children.Count;
-                    for (int j = firstChildControlIndex; j < count; j++)
-                    {
-                        var child = list.Properties.Children[j];
-                        if (disableSingle && child is PropertyNameLabel)
-                            break;
-
-                        if (child != null)
-                            child.Enabled = false;
-                    }
-                }
-            }
             if (item.VisibleIfs.Length > 0 && itemLayout.Children.Count > 0)
             {
                 PropertiesListElement list = null;
@@ -667,6 +648,45 @@ namespace FlaxEditor.CustomEditors.Editors
                     InversionList = item.VisibleIfs.Select((x, i) => x.Invert).ToArray(),
                 };
             }
+        }
+
+        /// <summary>
+        /// Get the label index.
+        /// </summary>
+        /// <param name="itemLayout">The item layout.</param>
+        /// <param name="item">The item.</param>
+        /// <returns>The label index.</returns>
+        protected virtual int GetLabelIndex(LayoutElementsContainer itemLayout, ItemInfo item)
+        {
+            int labelIndex = 0;
+            if ((item.IsReadOnly || item.VisibleIfs.Length > 0) &&
+                itemLayout.Children.Count > 0 &&
+                itemLayout.Children[itemLayout.Children.Count - 1] is PropertiesListElement propertiesListElement)
+            {
+                labelIndex = propertiesListElement.Labels.Count;
+            }
+
+            return labelIndex;
+        }
+
+        /// <summary>
+        /// Spawns the property for the given item.
+        /// </summary>
+        /// <param name="itemLayout">The item layout.</param>
+        /// <param name="itemValues">The item values.</param>
+        /// <param name="item">The item.</param>
+        protected virtual void SpawnProperty(LayoutElementsContainer itemLayout, ValueContainer itemValues, ItemInfo item)
+        {
+            int labelIndex = GetLabelIndex(itemLayout, item);
+
+            itemLayout.Property(item.DisplayName, itemValues, item.OverrideEditor, item.TooltipText);
+
+            if (item.IsReadOnly && itemLayout.Children.Count > 0)
+            {
+                OnReadOnlyProperty(itemLayout, labelIndex);
+            }
+
+            EvaluateVisibleIf(itemLayout, item, labelIndex);
         }
 
         /// <inheritdoc />

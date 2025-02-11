@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Variant.h"
 #include "CommonValue.h"
@@ -112,7 +112,7 @@ VariantType::VariantType(Types type, const StringAnsiView& typeName)
     }
 }
 
-VariantType::VariantType(Types type, MClass* klass)
+VariantType::VariantType(Types type, const MClass* klass)
 {
     Type = type;
     TypeName = nullptr;
@@ -1824,6 +1824,7 @@ Variant::operator Float4() const
         return Float4(*(Float3*)AsData, 0.0f);
     case VariantType::Float4:
     case VariantType::Color:
+    case VariantType::Quaternion:
         return *(Float4*)AsData;
     case VariantType::Double2:
         return Float4(AsDouble2(), 0.0f, 0.0f);
@@ -2449,7 +2450,9 @@ void Variant::SetType(const VariantType& type)
     case VariantType::Structure:
         AllocStructure();
         break;
-    default: ;
+    default:
+        AsUint64 = 0;
+        break;
     }
 }
 
@@ -2702,8 +2705,8 @@ void Variant::SetAsset(Asset* asset)
         SetType(VariantType(VariantType::Asset));
     if (AsAsset)
     {
-        asset->OnUnloaded.Unbind<Variant, &Variant::OnAssetUnloaded>(this);
-        asset->RemoveReference();
+        AsAsset->OnUnloaded.Unbind<Variant, &Variant::OnAssetUnloaded>(this);
+        AsAsset->RemoveReference();
     }
     AsAsset = asset;
     if (asset)
@@ -2738,12 +2741,12 @@ String Variant::ToString() const
                 const auto items = typeHandle.GetType().Enum.Items;
                 for (int32 i = 0; items[i].Name; i++)
                 {
-                    if (items[i].Value == AsUint)
+                    if (items[i].Value == AsUint64)
                         return String(items[i].Name);
                 }
             }
         }
-        return StringUtils::ToString(AsUint);
+        return StringUtils::ToString(AsUint64);
     case VariantType::Int64:
         return StringUtils::ToString(AsInt64);
     case VariantType::Uint64:
@@ -3065,6 +3068,89 @@ void Variant::DeleteValue()
     SetType(VariantType(VariantType::Null));
 }
 
+Variant Variant::Parse(const StringView& text, const VariantType& type)
+{
+    Variant result;
+    result.SetType(type);
+    if (text.IsEmpty())
+        return result;
+    if (type != VariantType())
+    {
+        switch (type.Type)
+        {
+        case VariantType::Bool:
+            if (text == TEXT("1") || text.Compare(StringView(TEXT("true"), 4), StringSearchCase::IgnoreCase) == 0)
+                result.AsBool = true;
+            break;
+        case VariantType::Int16:
+            StringUtils::Parse(text.Get(), text.Length(), &result.AsInt16);
+            break;
+        case VariantType::Uint16:
+            StringUtils::Parse(text.Get(), text.Length(), &result.AsUint16);
+            break;
+        case VariantType::Int:
+            StringUtils::Parse(text.Get(), text.Length(), &result.AsInt);
+            break;
+        case VariantType::Uint:
+            StringUtils::Parse(text.Get(), text.Length(), &result.AsUint);
+            break;
+        case VariantType::Int64:
+            StringUtils::Parse(text.Get(), text.Length(), &result.AsInt64);
+            break;
+        case VariantType::Uint64:
+        case VariantType::Enum:
+            if (!StringUtils::Parse(text.Get(), text.Length(), &result.AsUint64))
+            {
+            }
+            else if (type.TypeName)
+            {
+                const ScriptingTypeHandle typeHandle = Scripting::FindScriptingType(StringAnsiView(type.TypeName));
+                if (typeHandle && typeHandle.GetType().Type == ScriptingTypes::Enum)
+                {
+                    const auto items = typeHandle.GetType().Enum.Items;
+                    StringAsANSI<32> textAnsi(text.Get(), text.Length());
+                    StringAnsiView textAnsiView(textAnsi.Get());
+                    for (int32 i = 0; items[i].Name; i++)
+                    {
+                        if (textAnsiView == items[i].Name)
+                        {
+                            result.AsUint64 = items[i].Value;
+                            break;
+                        }
+                    }
+                }
+            }
+            break;
+        case VariantType::Float:
+            StringUtils::Parse(text.Get(), &result.AsFloat);
+            break;
+        case VariantType::Double:
+            StringUtils::Parse(text.Get(), &result.AsFloat);
+            result.AsDouble = (float)result.AsFloat;
+            break;
+        case VariantType::String:
+            result.SetString(text);
+        default:
+            break;
+        }
+    }
+    else
+    {
+        // Parse as number
+        int32 valueInt;
+        if (!StringUtils::Parse(text.Get(), text.Length(), &valueInt))
+        {
+            result = valueInt;
+        }
+        else
+        {
+            // Fallback to string
+            result.SetString(text);
+        }
+    }
+    return result;
+}
+
 bool Variant::CanCast(const Variant& v, const VariantType& to)
 {
     if (v.Type == to)
@@ -3349,6 +3435,16 @@ bool Variant::CanCast(const Variant& v, const VariantType& to)
         case VariantType::Double2:
         case VariantType::Double3:
         case VariantType::Double4:
+            return true;
+        default:
+            return false;
+        }
+    case VariantType::Null:
+        switch (to.Type)
+        {
+    case VariantType::Asset:
+    case VariantType::ManagedObject:
+    case VariantType::Object:
             return true;
         default:
             return false;
@@ -3790,6 +3886,114 @@ Variant Variant::Cast(const Variant& v, const VariantType& to)
         default: ;
         }
         break;
+    case VariantType::Double2:
+        switch (to.Type)
+        {
+        case VariantType::Bool:
+            return Variant(Math::Abs(((Double2*)v.AsData)->X) > ZeroTolerance);
+        case VariantType::Int16:
+            return Variant((int16)((Double2*)v.AsData)->X);
+        case VariantType::Int:
+            return Variant((int32)((Double2*)v.AsData)->X);
+        case VariantType::Uint16:
+            return Variant((uint16)((Double2*)v.AsData)->X);
+        case VariantType::Uint:
+            return Variant((uint32)((Double2*)v.AsData)->X);
+        case VariantType::Int64:
+            return Variant((int64)((Double2*)v.AsData)->X);
+        case VariantType::Uint64:
+            return Variant((uint64)((Double2*)v.AsData)->X);
+        case VariantType::Float:
+            return Variant((float)((Double2*)v.AsData)->X);
+        case VariantType::Double:
+            return Variant((double)((Double2*)v.AsData)->X);
+        case VariantType::Float2:
+            return Variant(Float2(*(Double2*)v.AsData));
+        case VariantType::Float3:
+            return Variant(Float3(*(Double2*)v.AsData, 0.0f));
+        case VariantType::Float4:
+            return Variant(Float4(*(Double2*)v.AsData, 0.0f, 0.0f));
+        case VariantType::Color:
+            return Variant(Color(((Double2*)v.AsData)->X, ((Double2*)v.AsData)->Y, 0.0f, 0.0f));
+        case VariantType::Double3:
+            return Variant(Double3(*(Double2*)v.AsData, 0.0));
+        case VariantType::Double4:
+            return Variant(Double4(*(Double2*)v.AsData, 0.0, 0.0));
+        default: ;
+        }
+        break;
+    case VariantType::Double3:
+        switch (to.Type)
+        {
+        case VariantType::Bool:
+            return Variant(Math::Abs(((Double3*)v.AsData)->X) > ZeroTolerance);
+        case VariantType::Int16:
+            return Variant((int16)((Double3*)v.AsData)->X);
+        case VariantType::Int:
+            return Variant((int32)((Double3*)v.AsData)->X);
+        case VariantType::Uint16:
+            return Variant((uint16)((Double3*)v.AsData)->X);
+        case VariantType::Uint:
+            return Variant((uint32)((Double3*)v.AsData)->X);
+        case VariantType::Int64:
+            return Variant((int64)((Double3*)v.AsData)->X);
+        case VariantType::Uint64:
+            return Variant((uint64)((Double3*)v.AsData)->X);
+        case VariantType::Float:
+            return Variant((float)((Double3*)v.AsData)->X);
+        case VariantType::Double:
+            return Variant((double)((Double3*)v.AsData)->X);
+        case VariantType::Float2:
+            return Variant(Float2(*(Double3*)v.AsData));
+        case VariantType::Float3:
+            return Variant(Float3(*(Double3*)v.AsData));
+        case VariantType::Float4:
+            return Variant(Float4(*(Double3*)v.AsData, 0.0f));
+        case VariantType::Color:
+            return Variant(Color(((Double3*)v.AsData)->X, ((Double3*)v.AsData)->Y, ((Double3*)v.AsData)->Z, 0.0f));
+        case VariantType::Double2:
+            return Variant(Double2(*(Double3*)v.AsData));
+        case VariantType::Double4:
+            return Variant(Double4(*(Double3*)v.AsData, 0.0));
+        default: ;
+        }
+        break;
+    case VariantType::Double4:
+        switch (to.Type)
+        {
+        case VariantType::Bool:
+            return Variant(Math::Abs(((Double4*)v.AsData)->X) > ZeroTolerance);
+        case VariantType::Int16:
+            return Variant((int16)((Double4*)v.AsData)->X);
+        case VariantType::Int:
+            return Variant((int32)((Double4*)v.AsData)->X);
+        case VariantType::Uint16:
+            return Variant((uint16)((Double4*)v.AsData)->X);
+        case VariantType::Uint:
+            return Variant((uint32)((Double4*)v.AsData)->X);
+        case VariantType::Int64:
+            return Variant((int64)((Double4*)v.AsData)->X);
+        case VariantType::Uint64:
+            return Variant((uint64)((Double4*)v.AsData)->X);
+        case VariantType::Float:
+            return Variant((float)((Double4*)v.AsData)->X);
+        case VariantType::Double:
+            return Variant((double)((Double4*)v.AsData)->X);
+        case VariantType::Float2:
+            return Variant(Float2(*(Double4*)v.AsData));
+        case VariantType::Float3:
+            return Variant(Float3(*(Double4*)v.AsData));
+        case VariantType::Float4:
+            return Variant(Float4(*(Double4*)v.AsData));
+        case VariantType::Color:
+            return Variant(*(Double4*)v.AsData);
+        case VariantType::Double2:
+            return Variant(Double2(*(Double4*)v.AsData));
+        case VariantType::Double3:
+            return Variant(Double3(*(Double4*)v.AsData));
+        default: ;
+        }
+        break;
     case VariantType::Color:
         switch (to.Type)
         {
@@ -3826,6 +4030,23 @@ Variant Variant::Cast(const Variant& v, const VariantType& to)
         default: ;
         }
         break;
+    case VariantType::Null:
+        switch (to.Type)
+        {
+        case VariantType::Asset:
+            return Variant((Asset*)nullptr);
+        case VariantType::Object:
+            return Variant((ScriptingObject*)nullptr);
+        case VariantType::ManagedObject:
+        {
+            Variant result;
+            result.SetType(VariantType(VariantType::ManagedObject));
+            result.MANAGED_GC_HANDLE = 0;
+            return result;
+        }
+        default:
+            return false;
+        }
     default: ;
     }
     LOG(Error, "Cannot cast Variant from {0} to {1}", v.Type, to);

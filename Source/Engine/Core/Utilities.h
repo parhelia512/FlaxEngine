@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -38,11 +38,14 @@ namespace Utilities
         return (T)round((double)value * 1000.0) / (T)1000;
     }
 
-    // Converts units to the best fitting human-readable denominator
-    // @param units Units count
-    // @param divider Amount of units required for the next size
-    // @param sizes Array with human-readable sizes to convert from
-    // @return The best fitting string of the units
+    /// <summary>
+    /// Converts units to the best fitting human-readable denominator.
+    /// </summary>
+    /// <typeparam name="T">Value type.</typeparam>
+    /// <param name="units">Units count</param>
+    /// <param name="divider">Amount of units required for the next size.</param>
+    /// <param name="sizes">Array with human-readable sizes to convert from.</param>
+    /// <returns>The best fitting string of the units.</returns>
     template<typename T>
     String UnitsToText(T units, int32 divider, const Span<const Char*> sizes)
     {
@@ -61,18 +64,24 @@ namespace Utilities
         return String::Format(TEXT("{0} {1}"), text, sizes[i]);
     }
 
-    // Converts size of the file (in bytes) to the best fitting string
-    // @param bytes Size of the file in bytes
-    // @return The best fitting string of the file size
+    /// <summary>
+    /// Converts size of the data (in bytes) to the best fitting string.
+    /// </summary>
+    /// <typeparam name="T">Value type.</typeparam>
+    /// <param name="bytes">Size of the data in bytes.</param>
+    /// <returns>The best fitting string of the data size.</returns>
     template<typename T>
     String BytesToText(T bytes)
     {
         return UnitsToText(bytes, 1024, Private::BytesSizes);
     }
 
-    // Converts hertz to the best fitting string
-    // @param hertz Hertz for convertion
-    // @return The best fitting string
+    /// <summary>
+    /// Converts hertz to the best fitting string.
+    /// </summary>
+    /// <typeparam name="T">Value type.</typeparam>
+    /// <param name="hertz">Value in hertz for conversion.</param>
+    /// <returns>The best fitting string.</returns>
     template<typename T>
     String HertzToText(T hertz)
     {
@@ -93,5 +102,16 @@ namespace Utilities
         x = (x + (x >> 4)) & 0x0F0F0F0F;
         return (x * 0x01010101) >> 24;
 #endif  
+    }
+
+    // Copy memory region but ignoring address sanatizer checks for memory regions.
+    NO_SANITIZE_ADDRESS static void UnsafeMemoryCopy(void* dst, const void* src, uint64 size)
+    {
+#if BUILD_RELEASE
+        memcpy(dst, src, static_cast<size_t>(size));
+#else
+        for (uint64 i = 0; i < size; i++)
+            ((byte*)dst)[i] = ((byte*)src)[i];
+#endif
     }
 }

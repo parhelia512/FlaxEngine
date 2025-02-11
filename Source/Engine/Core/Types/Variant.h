@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -105,7 +105,7 @@ public:
 
     explicit VariantType(Types type, const StringView& typeName);
     explicit VariantType(Types type, const StringAnsiView& typeName);
-    explicit VariantType(Types type, MClass* klass);
+    explicit VariantType(Types type, const MClass* klass);
     explicit VariantType(const StringAnsiView& typeName);
     VariantType(const VariantType& other);
     VariantType(VariantType&& other) noexcept;
@@ -146,7 +146,7 @@ DEFINE_DEFAULT_FORMATTING_VIA_TO_STRING(VariantType);
 API_STRUCT(InBuild) struct FLAXENGINE_API Variant
 {
     /// <summary>
-    /// Thee value type.
+    /// The value type.
     /// </summary>
     VariantType Type;
 
@@ -380,6 +380,9 @@ public:
 
     // Frees the object or data owned by this Variant container (eg. structure or object).
     void DeleteValue();
+
+    // Parses the text into the Variant value. Allows to specify explicit value type.
+    static Variant Parse(const StringView& text, const VariantType& type = VariantType());
 
     FORCE_INLINE Variant Cast(const VariantType& to) const
     {

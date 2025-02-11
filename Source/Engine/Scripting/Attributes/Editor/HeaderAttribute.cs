@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 
@@ -23,11 +23,14 @@ namespace FlaxEngine
         public int FontSize;
 
         /// <summary>
-        /// The custom header color (as 32-bit uint).
+        /// The custom header color (as 32-bit uint in RGB order, bottom bits contain Blue).
         /// </summary>
         public uint Color;
 
-        private HeaderAttribute()
+        /// <summary>
+        /// Initializes a new instance of the <see cref="HeaderAttribute"/> class.
+        /// </summary>
+        public HeaderAttribute()
         {
         }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Xml;
@@ -42,6 +42,7 @@ namespace FlaxEditor.Windows.Assets
         private bool _liveReload = false;
         private bool _isUpdatingSelection, _isScriptsReloading;
         private DateTime _modifiedTime = DateTime.MinValue;
+        private bool _isDropping = false;
 
         /// <summary>
         /// Gets the prefab hierarchy tree control.
@@ -67,6 +68,11 @@ namespace FlaxEditor.Windows.Assets
         /// The local scene nodes graph used by the prefab editor.
         /// </summary>
         public readonly LocalSceneGraph Graph;
+
+        /// <summary>
+        /// Indication of if the prefab window selection is locked on specific objects.
+        /// </summary>
+        public bool LockSelectedObjects = false;
 
         /// <summary>
         /// Gets or sets a value indicating whether use live reloading for the prefab changes (applies prefab changes on modification by auto).
@@ -132,7 +138,7 @@ namespace FlaxEditor.Windows.Assets
                 IsScrollable = false,
                 Offsets = new Margin(0, 0, 0, 18 + 6),
             };
-            _searchBox = new SearchBox()
+            _searchBox = new SearchBox
             {
                 AnchorPreset = AnchorPresets.HorizontalStretchMiddle,
                 Parent = headerPanel,
@@ -140,7 +146,8 @@ namespace FlaxEditor.Windows.Assets
             };
             _searchBox.TextChanged += OnSearchBoxTextChanged;
 
-            _treePanel = new Panel()
+            // Prefab structure tree
+            _treePanel = new Panel
             {
                 AnchorPreset = AnchorPresets.StretchAll,
                 Offsets = new Margin(0.0f, 0.0f, headerPanel.Bottom, 0.0f),
@@ -148,8 +155,6 @@ namespace FlaxEditor.Windows.Assets
                 IsScrollable = true,
                 Parent = sceneTreePanel,
             };
-
-            // Prefab structure tree
             Graph = new LocalSceneGraph(new CustomRootNode(this));
             Graph.Root.TreeNode.Expand(true);
             _tree = new PrefabTree
@@ -176,14 +181,14 @@ namespace FlaxEditor.Windows.Assets
             _propertiesEditor.Modified += MarkAsEdited;
 
             // Toolstrip
-            _saveButton = (ToolStripButton)_toolstrip.AddButton(Editor.Icons.Save64, Save).LinkTooltip("Save");
+            _saveButton = _toolstrip.AddButton(Editor.Icons.Save64, Save).LinkTooltip("Save", ref inputOptions.Save);
             _toolstrip.AddSeparator();
-            _toolStripUndo = (ToolStripButton)_toolstrip.AddButton(Editor.Icons.Undo64, _undo.PerformUndo).LinkTooltip($"Undo ({inputOptions.Undo})");
-            _toolStripRedo = (ToolStripButton)_toolstrip.AddButton(Editor.Icons.Redo64, _undo.PerformRedo).LinkTooltip($"Redo ({inputOptions.Redo})");
+            _toolStripUndo = _toolstrip.AddButton(Editor.Icons.Undo64, _undo.PerformUndo).LinkTooltip("Undo", ref inputOptions.Undo);
+            _toolStripRedo = _toolstrip.AddButton(Editor.Icons.Redo64, _undo.PerformRedo).LinkTooltip("Redo", ref inputOptions.Redo);
             _toolstrip.AddSeparator();
-            _toolStripTranslate = (ToolStripButton)_toolstrip.AddButton(Editor.Icons.Translate32, () => _viewport.TransformGizmo.ActiveMode = TransformGizmoBase.Mode.Translate).LinkTooltip($"Change Gizmo tool mode to Translate ({inputOptions.TranslateMode})");
-            _toolStripRotate = (ToolStripButton)_toolstrip.AddButton(Editor.Icons.Rotate32, () => _viewport.TransformGizmo.ActiveMode = TransformGizmoBase.Mode.Rotate).LinkTooltip($"Change Gizmo tool mode to Rotate ({inputOptions.RotateMode})");
-            _toolStripScale = (ToolStripButton)_toolstrip.AddButton(Editor.Icons.Scale32, () => _viewport.TransformGizmo.ActiveMode = TransformGizmoBase.Mode.Scale).LinkTooltip($"Change Gizmo tool mode to Scale ({inputOptions.ScaleMode})");
+            _toolStripTranslate = _toolstrip.AddButton(Editor.Icons.Translate32, () => _viewport.TransformGizmo.ActiveMode = TransformGizmoBase.Mode.Translate).LinkTooltip("Change Gizmo tool mode to Translate", ref inputOptions.TranslateMode);
+            _toolStripRotate = _toolstrip.AddButton(Editor.Icons.Rotate32, () => _viewport.TransformGizmo.ActiveMode = TransformGizmoBase.Mode.Rotate).LinkTooltip("Change Gizmo tool mode to Rotate", ref inputOptions.RotateMode);
+            _toolStripScale = _toolstrip.AddButton(Editor.Icons.Scale32, () => _viewport.TransformGizmo.ActiveMode = TransformGizmoBase.Mode.Scale).LinkTooltip("Change Gizmo tool mode to Scale", ref inputOptions.ScaleMode);
             _toolstrip.AddSeparator();
             _toolStripLiveReload = (ToolStripButton)_toolstrip.AddButton(Editor.Icons.Refresh64, () => LiveReload = !LiveReload).SetChecked(true).SetAutoCheck(true).LinkTooltip("Live changes preview (applies prefab changes on modification by auto)");
 
@@ -269,9 +274,14 @@ namespace FlaxEditor.Windows.Assets
                 return true;
             }
 
-            if (button == MouseButton.Left && _treePanel.ContainsPoint(ref location))
+            if (button == MouseButton.Left && _treePanel.ContainsPoint(ref location) && !_isDropping)
             {
                 _tree.Deselect();
+                return true;
+            }
+            if (_isDropping)
+            {
+                _isDropping = false;
                 return true;
             }
             return false;
@@ -316,11 +326,7 @@ namespace FlaxEditor.Windows.Assets
                 return;
 
             // Restore
-            _viewport.Prefab = _asset;
-            Graph.MainActor = _viewport.Instance;
-            Selection.Clear();
-            Select(Graph.Main);
-            Graph.Root.TreeNode.Expand(true);
+            OnPrefabOpened();
             _undo.Clear();
             ClearEditedFlag();
         }
@@ -346,6 +352,16 @@ namespace FlaxEditor.Windows.Assets
             }
         }
 
+        private void OnPrefabOpened()
+        {
+            _viewport.Prefab = _asset;
+            _viewport.UpdateGizmoMode();
+            Graph.MainActor = _viewport.Instance;
+            Selection.Clear();
+            Select(Graph.Main);
+            Graph.Root.TreeNode.Expand(true);
+        }
+
         /// <inheritdoc />
         public override void Save()
         {
@@ -355,6 +371,8 @@ namespace FlaxEditor.Windows.Assets
 
             try
             {
+                Editor.Scene.OnSaveStart(_viewport._uiParentLink);
+
                 // Simply update changes
                 Editor.Prefabs.ApplyAll(_viewport.Instance);
 
@@ -370,6 +388,10 @@ namespace FlaxEditor.Windows.Assets
                 }
 
                 throw;
+            }
+            finally
+            {
+                Editor.Scene.OnSaveEnd(_viewport._uiParentLink);
             }
         }
 
@@ -411,13 +433,8 @@ namespace FlaxEditor.Windows.Assets
                 return;
             }
 
-            _viewport.Prefab = _asset;
-            Graph.MainActor = _viewport.Instance;
+            OnPrefabOpened();
             _focusCamera = true;
-            Selection.Clear();
-            Select(Graph.Main);
-            Graph.Root.TreeNode.Expand(true);
-
             _undo.Clear();
             ClearEditedFlag();
 
@@ -462,11 +479,7 @@ namespace FlaxEditor.Windows.Assets
                 _viewport.Prefab = null;
                 if (_asset.IsLoaded)
                 {
-                    _viewport.Prefab = _asset;
-                    Graph.MainActor = _viewport.Instance;
-                    Selection.Clear();
-                    Select(Graph.Main);
-                    Graph.Root.TreeNode.ExpandAll(true);
+                    OnPrefabOpened();
                 }
             }
             finally
@@ -478,7 +491,6 @@ namespace FlaxEditor.Windows.Assets
             if (_focusCamera && _viewport.Task.FrameCount > 1)
             {
                 _focusCamera = false;
-
                 Editor.GetActorEditorSphere(_viewport.Instance, out BoundingSphere bounds);
                 _viewport.ViewPosition = bounds.Center - _viewport.ViewDirection * (bounds.Radius * 1.2f);
             }

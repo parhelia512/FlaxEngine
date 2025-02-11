@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System.Collections.Generic;
 using FlaxEditor.Content;
@@ -131,7 +131,7 @@ namespace FlaxEditor.Windows
         public void ClearItemsSearch()
         {
             // Skip if already cleared
-            if (_itemsSearchBox.TextLength == 0 && !_viewDropdown.HasSelection)
+            if (_itemsSearchBox.TextLength == 0)
                 return;
 
             IsLayoutLocked = true;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Scene.h"
 #include "SceneAsset.h"
@@ -28,6 +28,12 @@ SceneAsset::SceneAsset(const SpawnParams& params, const AssetInfo* info)
 bool SceneAsset::IsInternalType() const
 {
     return true;
+}
+
+void SceneNavigation::Clear()
+{
+    Volumes.Clear();
+    Actors.Clear();
 }
 
 BoundingBox SceneNavigation::GetNavigationBounds()
@@ -127,7 +133,8 @@ Array<Guid> Scene::GetAssetReferences() const
     const auto asset = Content::Load<SceneAsset>(GetID());
     if (asset)
     {
-        asset->GetReferences(result);
+        Array<String> files;
+        asset->GetReferences(result, files);
     }
     else
     {
@@ -173,7 +180,7 @@ void Scene::CreateCsgCollider()
     // Create collider
     auto result = New<MeshCollider>();
     result->SetStaticFlags(StaticFlags::FullyStatic);
-    result->SetName(CSG_COLLIDER_NAME);
+    result->SetName(String(CSG_COLLIDER_NAME));
     result->CollisionData = CSGData.CollisionData;
     result->HideFlags |= HideFlags::DontSelect;
 
@@ -196,7 +203,7 @@ void Scene::CreateCsgModel()
     // Create model
     auto result = New<StaticModel>();
     result->SetStaticFlags(StaticFlags::FullyStatic);
-    result->SetName(CSG_MODEL_NAME);
+    result->SetName(String(CSG_MODEL_NAME));
     result->Model = CSGData.Model;
     result->HideFlags |= HideFlags::DontSelect;
 
@@ -272,9 +279,6 @@ void Scene::Serialize(SerializeStream& stream, const void* otherObj)
     Actor::Serialize(stream, otherObj);
 
     SERIALIZE_GET_OTHER_OBJ(Scene);
-
-    // Update scene info object
-    SaveTime = DateTime::NowUTC();
 
     LightmapsData.SaveLightmaps(Info.Lightmaps);
     Info.Serialize(stream, other ? &other->Info : nullptr);
@@ -375,6 +379,7 @@ void Scene::EndPlay()
     // Improve scene cleanup performance by removing all data from scene rendering and ticking containers
     Ticking.Clear();
     Rendering.Clear();
+    Navigation.Clear();
 
     // Base
     Actor::EndPlay();

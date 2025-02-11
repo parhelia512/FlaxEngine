@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEditor.GUI.Timeline.Undo;
@@ -100,7 +100,7 @@ namespace FlaxEditor.GUI.Timeline
         private Track _tack;
         private int _startFrame, _durationFrames;
         private Float2 _mouseLocation = Float2.Minimum;
-        private bool _isMoving;
+        internal bool _isMoving;
         private Float2 _startMoveLocation;
         private int _startMoveStartFrame;
         private int _startMoveDuration;
@@ -347,7 +347,7 @@ namespace FlaxEditor.GUI.Timeline
 
             var isMovingWholeMedia = _isMoving && !_startMoveRightEdge && !_startMoveLeftEdge;
             var borderHighlightColor = style.BorderHighlighted;
-            var moveColor = style.ProgressNormal;
+            var moveColor = style.SelectionBorder;
             var selectedColor = style.BackgroundSelected;
             var moveThickness = 2.0f;
             var borderColor = isMovingWholeMedia ? moveColor : (Timeline.SelectedMedia.Contains(this) ? selectedColor : (IsMouseOver ? borderHighlightColor : style.BorderNormal));

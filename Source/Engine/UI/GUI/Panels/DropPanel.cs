@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 
@@ -8,6 +8,7 @@ namespace FlaxEngine.GUI
     /// Drop Panel arranges control vertically and provides feature to collapse contents.
     /// </summary>
     /// <seealso cref="FlaxEngine.GUI.ContainerControl" />
+    [ActorToolbox("GUI")]
     public class DropPanel : ContainerControl
     {
         /// <summary>

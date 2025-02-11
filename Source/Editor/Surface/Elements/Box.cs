@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -40,6 +40,11 @@ namespace FlaxEditor.Surface.Elements
         /// The is selected flag for the box.
         /// </summary>
         protected bool _isSelected;
+
+        /// <summary>
+        /// The is active flag for the box. Unlike <see cref="FlaxEngine.GUI.Control.Enabled"/>, inactive boxes can still be interacted with, they just will be drawn like disabled boxes
+        /// </summary>
+        protected bool _isActive = true;
 
         /// <summary>
         /// Unique box ID within single node.
@@ -178,6 +183,15 @@ namespace FlaxEditor.Surface.Elements
                 _isSelected = value;
                 OnSelectionChanged();
             }
+        }
+
+        /// <summary>
+        /// Gets or sets the active state of the box. Unlike <see cref="FlaxEngine.GUI.Control.Enabled"/>, inactive boxes can still be interacted with, they just will be drawn like disabled boxes
+        /// </summary>
+        public bool IsActive
+        {
+            get => _isActive;
+            set => _isActive = value;
         }
 
         /// <inheritdoc />
@@ -724,7 +738,7 @@ namespace FlaxEditor.Surface.Elements
         /// <inheritdoc />
         public void DrawConnectingLine(ref Float2 startPos, ref Float2 endPos, ref Color color)
         {
-            OutputBox.DrawConnection(Surface.Style, ref startPos, ref endPos, ref color, 2);
+            OutputBox.DrawConnection(Surface.Style, ref startPos, ref endPos, ref color, OutputBox.ConnectingConnectionThickness);
         }
 
         /// <inheritdoc />

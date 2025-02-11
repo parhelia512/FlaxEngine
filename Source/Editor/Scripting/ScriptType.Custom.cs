@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Reflection;
@@ -143,6 +143,12 @@ namespace FlaxEditor.Scripting
         public ScriptMemberInfo[] GetMethods(BindingFlags bindingAttr)
         {
             return Utils.GetEmptyArray<ScriptMemberInfo>();
+        }
+
+        /// <inheritdoc />
+        public void TrackLifetime(Action<ScriptType> disposing)
+        {
+            ElementType.TrackLifetime(disposing);
         }
     }
 }

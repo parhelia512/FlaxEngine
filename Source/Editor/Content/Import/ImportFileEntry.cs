@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System.Collections.Generic;
 using System.IO;
@@ -133,6 +133,7 @@ namespace FlaxEditor.Content.Import
             FileTypes["dds"] = ImportTexture;
             FileTypes["hdr"] = ImportTexture;
             FileTypes["raw"] = ImportTexture;
+            FileTypes["exr"] = ImportTexture;
 
             // Models
             FileTypes["obj"] = ImportModel;

@@ -1,7 +1,8 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Collider.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Level/Scene/Scene.h"
 #if USE_EDITOR
 #include "Engine/Level/Scene/SceneRendering.h"
 #endif
@@ -20,6 +21,8 @@ Collider::Collider(const SpawnParams& params)
     , _cachedScale(1.0f)
     , _contactOffset(2.0f)
 {
+    Material.Loaded.Bind<Collider, &Collider::OnMaterialChanged>(this);
+    Material.Unload.Bind<Collider, &Collider::OnMaterialChanged>(this);
     Material.Changed.Bind<Collider, &Collider::OnMaterialChanged>(this);
 }
 
@@ -35,6 +38,13 @@ void Collider::SetIsTrigger(bool value)
     _isTrigger = value;
     if (_shape)
         PhysicsBackend::SetShapeState(_shape, IsActiveInHierarchy(), _isTrigger && CanBeTrigger());
+    if (EnumHasAnyFlags(_staticFlags, StaticFlags::Navigation) && _isEnabled)
+    {
+        if (_isTrigger)
+            GetScene()->Navigation.Actors.Remove(this);
+        else
+            GetScene()->Navigation.Actors.Add(this);
+    }
 }
 
 void Collider::SetCenter(const Vector3& value)
@@ -43,13 +53,9 @@ void Collider::SetCenter(const Vector3& value)
         return;
     _center = value;
     if (_staticActor)
-    {
         PhysicsBackend::SetShapeLocalPose(_shape, _center, Quaternion::Identity);
-    }
     else if (const RigidBody* rigidBody = GetAttachedRigidBody())
-    {
         PhysicsBackend::SetShapeLocalPose(_shape, (_localTransform.Translation + _localTransform.Orientation * _center) * rigidBody->GetScale(), _localTransform.Orientation);
-    }
     UpdateBounds();
 }
 
@@ -65,6 +71,7 @@ void Collider::SetContactOffset(float value)
 
 bool Collider::RayCast(const Vector3& origin, const Vector3& direction, float& resultHitDistance, float maxDistance) const
 {
+    CHECK_RETURN_DEBUG(direction.IsNormalized(), false);
     resultHitDistance = MAX_float;
     if (_shape == nullptr)
         return false;
@@ -73,6 +80,7 @@ bool Collider::RayCast(const Vector3& origin, const Vector3& direction, float& r
 
 bool Collider::RayCast(const Vector3& origin, const Vector3& direction, RayCastHit& hitInfo, float maxDistance) const
 {
+    CHECK_RETURN_DEBUG(direction.IsNormalized(), false);
     if (_shape == nullptr)
         return false;
     return PhysicsBackend::RayCastShape(_shape, _transform.Translation, _transform.Orientation, origin, direction, hitInfo, maxDistance);
@@ -134,25 +142,27 @@ RigidBody* Collider::GetAttachedRigidBody() const
     return nullptr;
 }
 
-#if USE_EDITOR
-
 void Collider::OnEnable()
 {
+    if (EnumHasAnyFlags(_staticFlags, StaticFlags::Navigation) && !_isTrigger)
+        GetScene()->Navigation.Actors.Add(this);
+#if USE_EDITOR
     GetSceneRendering()->AddPhysicsDebug<Collider, &Collider::DrawPhysicsDebug>(this);
+#endif
 
-    // Base
-    Actor::OnEnable();
+    PhysicsColliderActor::OnEnable();
 }
 
 void Collider::OnDisable()
 {
-    // Base
-    Actor::OnDisable();
+    PhysicsColliderActor::OnDisable();
 
+    if (EnumHasAnyFlags(_staticFlags, StaticFlags::Navigation) && !_isTrigger)
+        GetScene()->Navigation.Actors.Remove(this);
+#if USE_EDITOR
     GetSceneRendering()->RemovePhysicsDebug<Collider, &Collider::DrawPhysicsDebug>(this);
-}
-
 #endif
+}
 
 void Collider::Attach(RigidBody* rigidBody)
 {
@@ -201,7 +211,7 @@ void Collider::CreateShape()
 
     // Create shape
     const bool isTrigger = _isTrigger && CanBeTrigger();
-    _shape = PhysicsBackend::CreateShape(this, shape, Material.Get(), IsActiveInHierarchy(), isTrigger);
+    _shape = PhysicsBackend::CreateShape(this, shape, Material, IsActiveInHierarchy(), isTrigger);
     PhysicsBackend::SetShapeContactOffset(_shape, _contactOffset);
     UpdateLayerBits();
 }
@@ -288,7 +298,7 @@ void Collider::OnMaterialChanged()
 {
     // Update the shape material
     if (_shape)
-        PhysicsBackend::SetShapeMaterial(_shape, Material.Get());
+        PhysicsBackend::SetShapeMaterial(_shape, Material);
 }
 
 void Collider::BeginPlay(SceneBeginData* data)
@@ -432,13 +442,26 @@ void Collider::OnLayerChanged()
         UpdateLayerBits();
 }
 
+void Collider::OnStaticFlagsChanged()
+{
+    PhysicsColliderActor::OnStaticFlagsChanged();
+
+    if (!_isTrigger && _isEnabled)
+    {
+        if (EnumHasAnyFlags(_staticFlags, StaticFlags::Navigation))
+            GetScene()->Navigation.Actors.AddUnique(this);
+        else
+            GetScene()->Navigation.Actors.Remove(this);
+    }
+}
+
 void Collider::OnPhysicsSceneChanged(PhysicsScene* previous)
 {
     PhysicsColliderActor::OnPhysicsSceneChanged(previous);
 
     if (_staticActor != nullptr)
     {
-        PhysicsBackend::RemoveSceneActor(previous->GetPhysicsScene(), _staticActor);
+        PhysicsBackend::RemoveSceneActor(previous->GetPhysicsScene(), _staticActor, true);
         void* scene = GetPhysicsScene()->GetPhysicsScene();
         PhysicsBackend::AddSceneActor(scene, _staticActor);
     }

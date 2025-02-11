@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Linq;
@@ -7,6 +7,7 @@ using FlaxEditor.CustomEditors.Editors;
 using FlaxEditor.CustomEditors.Elements;
 using FlaxEditor.GUI;
 using FlaxEditor.GUI.ContextMenu;
+using FlaxEditor.GUI.Input;
 using FlaxEditor.Scripting;
 using FlaxEngine;
 using FlaxEngine.GUI;
@@ -406,20 +407,13 @@ namespace FlaxEditor.CustomEditors.Dedicated
     /// <seealso cref="FlaxEditor.CustomEditors.Editors.GenericEditor" />
     public class UIControlControlEditor : GenericEditor
     {
-        private Type _cachedType;
+        private ScriptType[] _valueTypes;
         private bool _anchorDropDownClosed = true;
         private Button _pivotRelativeButton;
 
         /// <inheritdoc />
         public override void Initialize(LayoutElementsContainer layout)
         {
-            _cachedType = null;
-            if (HasDifferentTypes)
-            {
-                // TODO: support stable editing multiple different control types (via generic way or for transform-only)
-                return;
-            }
-
             // Set control type button
             var space = layout.Space(20);
             var buttonText = "Set Type";
@@ -444,24 +438,67 @@ namespace FlaxEditor.CustomEditors.Dedicated
             }
 
             // Add control type helper label
+            if (!Values.HasDifferentTypes)
             {
-                var type = Values[0].GetType();
-                _cachedType = type;
                 var label = layout.AddPropertyItem("Type", "The type of the created control.");
-                label.Label(type.FullName);
+                label.Label(Values[0].GetType().FullName);
             }
+            _valueTypes = Values.ValuesTypes;
 
             // Show control properties
             base.Initialize(layout);
 
             for (int i = 0; i < layout.Children.Count; i++)
             {
-                if (layout.Children[i] is GroupElement group && group.Panel.HeaderText == "Transform")
+                if (layout.Children[i] is GroupElement group && group.Panel.HeaderText.Equals("Transform", StringComparison.Ordinal))
                 {
-                    VerticalPanelElement mainHor = VerticalPanelWithoutMargin(group);
-                    CreateTransformElements(mainHor, ValuesTypes);
-                    group.ContainerControl.ChangeChildIndex(mainHor.Control, 0);
+                    layout.Children.Remove(group);
+                    layout.ContainerControl.Children.Remove(group.Panel);
                     break;
+                }
+            }
+
+            // Setup transform
+            if (Presenter is LayoutElementsContainer l)
+            {
+                for (int i = 0; i < l.Children.Count; i++)
+                {
+                    if (l.Children[i] is GroupElement g && g.Panel.HeaderText.Equals("Transform", StringComparison.Ordinal))
+                    {
+                        l.Children.Remove(g);
+                        l.ContainerControl.Children.Remove(g.Panel);
+                        break;
+                    }
+                }
+
+                var transformGroup = l.Group("Transform");
+                VerticalPanelElement mainHor = VerticalPanelWithoutMargin(transformGroup);
+                CreateTransformElements(mainHor, ValuesTypes);
+
+                ScriptMemberInfo scaleInfo = ValuesTypes[0].GetProperty("Scale");
+                ItemInfo scaleItem = new ItemInfo(scaleInfo);
+                transformGroup.Property("Scale", scaleItem.GetValues(Values));
+
+                ScriptMemberInfo pivotInfo = ValuesTypes[0].GetProperty("Pivot");
+                ItemInfo pivotItem = new ItemInfo(pivotInfo);
+                transformGroup.Property("Pivot", pivotItem.GetValues(Values));
+
+                ScriptMemberInfo shearInfo = ValuesTypes[0].GetProperty("Shear");
+                ItemInfo shearItem = new ItemInfo(shearInfo);
+                transformGroup.Property("Shear", shearItem.GetValues(Values));
+
+                ScriptMemberInfo rotationInfo = ValuesTypes[0].GetProperty("Rotation");
+                ItemInfo rotationItem = new ItemInfo(rotationInfo);
+                transformGroup.Property("Rotation", rotationItem.GetValues(Values));
+
+                // Get position of general tab
+                for (int i = 0; i < l.Children.Count; i++)
+                {
+                    if (l.Children[i] is GroupElement g && g.Panel.HeaderText.Equals("General", StringComparison.Ordinal) && i + 1 <= l.Children.Count)
+                    {
+                        Presenter.ContainerControl.ChangeChildIndex(transformGroup.Control, i + 1);
+                        break;
+                    }
                 }
             }
         }
@@ -589,26 +626,31 @@ namespace FlaxEditor.CustomEditors.Dedicated
             LayoutElementsContainer yEl;
             LayoutElementsContainer hEl;
             LayoutElementsContainer vEl;
+            Color axisColorX = ActorTransformEditor.AxisColorX;
+            Color axisColorY = ActorTransformEditor.AxisColorY;
+            FloatValueBox xV, yV, wV, hV;
             if (xEq)
             {
-                xEl = UniformPanelCapsuleForObjectWithText(horUp, "X: ", xItem.GetValues(Values));
-                vEl = UniformPanelCapsuleForObjectWithText(horDown, "Width: ", widthItem.GetValues(Values));
+                xEl = UniformPanelCapsuleForObjectWithText(horUp, "X: ", xItem.GetValues(Values), axisColorX, out xV);
+                vEl = UniformPanelCapsuleForObjectWithText(horDown, "Width: ", widthItem.GetValues(Values), axisColorX, out wV);
             }
             else
             {
-                xEl = UniformPanelCapsuleForObjectWithText(horUp, "Left: ", leftItem.GetValues(Values));
-                vEl = UniformPanelCapsuleForObjectWithText(horDown, "Right: ", rightItem.GetValues(Values));
+                xEl = UniformPanelCapsuleForObjectWithText(horUp, "Left: ", leftItem.GetValues(Values), axisColorX, out xV);
+                vEl = UniformPanelCapsuleForObjectWithText(horDown, "Right: ", rightItem.GetValues(Values), axisColorX, out wV);
             }
             if (yEq)
             {
-                yEl = UniformPanelCapsuleForObjectWithText(horUp, "Y: ", yItem.GetValues(Values));
-                hEl = UniformPanelCapsuleForObjectWithText(horDown, "Height: ", heightItem.GetValues(Values));
+                yEl = UniformPanelCapsuleForObjectWithText(horUp, "Y: ", yItem.GetValues(Values), axisColorY, out yV);
+                hEl = UniformPanelCapsuleForObjectWithText(horDown, "Height: ", heightItem.GetValues(Values), axisColorY, out hV);
             }
             else
             {
-                yEl = UniformPanelCapsuleForObjectWithText(horUp, "Top: ", topItem.GetValues(Values));
-                hEl = UniformPanelCapsuleForObjectWithText(horDown, "Bottom: ", bottomItem.GetValues(Values));
+                yEl = UniformPanelCapsuleForObjectWithText(horUp, "Top: ", topItem.GetValues(Values), axisColorY, out yV);
+                hEl = UniformPanelCapsuleForObjectWithText(horDown, "Bottom: ", bottomItem.GetValues(Values), axisColorY, out hV);
             }
+
+            // Anchors
             xEl.Control.AnchorMin = new Float2(0, xEl.Control.AnchorMin.Y);
             xEl.Control.AnchorMax = new Float2(0.5f, xEl.Control.AnchorMax.Y);
 
@@ -620,32 +662,49 @@ namespace FlaxEditor.CustomEditors.Dedicated
 
             hEl.Control.AnchorMin = new Float2(0.5f, xEl.Control.AnchorMin.Y);
             hEl.Control.AnchorMax = new Float2(1, xEl.Control.AnchorMax.Y);
+
+            // Navigation path
+            xV.NavTargetRight = yV;
+            yV.NavTargetRight = wV;
+            wV.NavTargetRight = hV;
+
+            yV.NavTargetLeft = xV;
+            wV.NavTargetLeft = yV;
+            hV.NavTargetLeft = wV;
         }
 
         private VerticalPanelElement VerticalPanelWithoutMargin(LayoutElementsContainer cont)
         {
-            var horUp = cont.VerticalPanel();
-            horUp.Panel.Margin = Margin.Zero;
-            return horUp;
+            var panel = cont.VerticalPanel();
+            panel.Panel.Margin = Margin.Zero;
+            return panel;
         }
 
         private CustomElementsContainer<UniformGridPanel> UniformGridTwoByOne(LayoutElementsContainer cont)
         {
-            var horUp = cont.CustomContainer<UniformGridPanel>();
-            horUp.CustomControl.SlotsHorizontally = 2;
-            horUp.CustomControl.SlotsVertically = 1;
-            horUp.CustomControl.SlotPadding = Margin.Zero;
-            horUp.CustomControl.ClipChildren = false;
-            return horUp;
+            var grid = cont.CustomContainer<UniformGridPanel>();
+            grid.CustomControl.SlotsHorizontally = 2;
+            grid.CustomControl.SlotsVertically = 1;
+            grid.CustomControl.SlotPadding = Margin.Zero;
+            grid.CustomControl.ClipChildren = false;
+            return grid;
         }
 
-        private CustomElementsContainer<UniformGridPanel> UniformPanelCapsuleForObjectWithText(LayoutElementsContainer el, string text, ValueContainer values)
+        private CustomElementsContainer<UniformGridPanel> UniformPanelCapsuleForObjectWithText(LayoutElementsContainer el, string text, ValueContainer values, Color borderColor, out FloatValueBox valueBox)
         {
-            CustomElementsContainer<UniformGridPanel> hor = UniformGridTwoByOne(el);
-            hor.CustomControl.SlotPadding = new Margin(5, 5, 0, 0);
-            LabelElement lab = hor.Label(text);
-            hor.Object(values);
-            return hor;
+            valueBox = null;
+            var grid = UniformGridTwoByOne(el);
+            grid.CustomControl.SlotPadding = new Margin(5, 5, 1, 1);
+            var label = grid.Label(text, TextAlignment.Far);
+            var editor = grid.Object(values);
+            if (editor is FloatEditor floatEditor && floatEditor.Element is FloatValueElement floatEditorElement)
+            {
+                valueBox = floatEditorElement.ValueBox;
+                var back = FlaxEngine.GUI.Style.Current.TextBoxBackground;
+                valueBox.BorderColor = Color.Lerp(borderColor, back, ActorTransformEditor.AxisGreyOutFactor);
+                valueBox.BorderSelectedColor = borderColor;
+            }
+            return grid;
         }
 
         private bool _cachedXEq;
@@ -654,17 +713,18 @@ namespace FlaxEditor.CustomEditors.Dedicated
         /// <inheritdoc />
         public override void Refresh()
         {
-            if (_cachedType != null)
+            // Automatic layout rebuild if control type gets changed
+            if (_valueTypes != null && 
+                !Values.HasNull && 
+                !Utils.ArraysEqual(_valueTypes, Values.ValuesTypes))
             {
-                // Automatic layout rebuild if control type gets changed
-                var type = Values.HasNull ? null : Values[0].GetType();
-                if (type != _cachedType)
-                {
-                    RebuildLayout();
-                    return;
-                }
+                RebuildLayout();
+                return;
+            }
 
-                // Refresh anchors
+            // Refresh anchors
+            if (Values != null && Values[0] != null)
+            {
                 GetAnchorEquality(out bool xEq, out bool yEq, ValuesTypes);
                 if (xEq != _cachedXEq || yEq != _cachedYEq)
                 {

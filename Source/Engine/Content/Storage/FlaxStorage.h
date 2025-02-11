@@ -1,11 +1,10 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
 #include "Engine/Core/Object.h"
 #include "Engine/Core/Delegate.h"
 #include "Engine/Core/Types/String.h"
-#include "Engine/Core/Types/DateTime.h"
 #include "Engine/Core/Collections/Array.h"
 #include "Engine/Platform/CriticalSection.h"
 #include "Engine/Serialization/FileReadStream.h"
@@ -88,17 +87,18 @@ public:
 
 protected:
     // State
-    int64 _refCount;
-    int64 _chunksLock;
-    DateTime _lastRefLostTime;
+    int64 _refCount = 0;
+    int64 _chunksLock = 0;
+    int64 _files = 0;
+    double _lastRefLostTime;
     CriticalSection _loadLocker;
 
     // Storage
-    ThreadLocalObject<FileReadStream> _file;
+    ThreadLocal<FileReadStream*> _file;
     Array<FlaxChunk*> _chunks;
 
     // Metadata
-    uint32 _version;
+    uint32 _version = 0;
     String _path;
 
 protected:
@@ -115,7 +115,7 @@ private:
         Platform::InterlockedDecrement(&_refCount);
         if (Platform::AtomicRead(&_refCount) == 0)
         {
-            _lastRefLostTime = DateTime::NowUTC();
+            _lastRefLostTime = Platform::GetTimeSeconds();
         }
     }
 
@@ -416,7 +416,7 @@ public:
     /// <summary>
     /// Ticks this instance.
     /// </summary>
-    void Tick();
+    void Tick(double time);
 
 #if USE_EDITOR
     void OnRename(const StringView& newPath);
@@ -441,7 +441,7 @@ public:
     /// <param name="silentMode">In silent mode don't reload opened storage container that is using target file.</param>
     /// <param name="customData">Custom options.</param>
     /// <returns>True if cannot create package, otherwise false</returns>
-    FORCE_INLINE static bool Create(const StringView& path, AssetInitData& data, bool silentMode = false, const CustomData* customData = nullptr)
+    FORCE_INLINE static bool Create(const StringView& path, const AssetInitData& data, bool silentMode = false, const CustomData* customData = nullptr)
     {
         return Create(path, &data, 1, silentMode, customData);
     }

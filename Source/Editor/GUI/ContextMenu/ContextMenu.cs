@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -42,15 +42,14 @@ namespace FlaxEditor.GUI.ContextMenu
 
                 // Arrange controls
                 Margin margin = _menu._itemsMargin;
-                float y = margin.Top;
-                float x = margin.Left;
+                float y = 0;
                 float width = Width - margin.Width;
                 for (int i = 0; i < _children.Count; i++)
                 {
                     if (_children[i] is ContextMenuItem item && item.Visible)
                     {
                         var height = item.Height;
-                        item.Bounds = new Rectangle(x, y, width, height);
+                        item.Bounds = new Rectangle(margin.Left, y, width, height);
                         y += height + margin.Height;
                     }
                 }
@@ -300,7 +299,6 @@ namespace FlaxEditor.GUI.ContextMenu
                 if (_panel.Children[i] is ContextMenuChildMenu menu && menu.Text == text)
                     return menu;
             }
-
             return null;
         }
 
@@ -319,7 +317,6 @@ namespace FlaxEditor.GUI.ContextMenu
                     Parent = _panel
                 };
             }
-
             return item;
         }
 
@@ -340,14 +337,12 @@ namespace FlaxEditor.GUI.ContextMenu
         /// <summary>
         /// Adds the separator.
         /// </summary>
-        /// <returns>Created context menu item control.</returns>
-        public ContextMenuSeparator AddSeparator()
+        public void AddSeparator()
         {
             var item = new ContextMenuSeparator(this)
             {
                 Parent = _panel
             };
-            return item;
         }
 
         /// <summary>
@@ -360,15 +355,26 @@ namespace FlaxEditor.GUI.ContextMenu
         }
 
         /// <inheritdoc />
-        public override bool ContainsPoint(ref Float2 location)
+        public override void Show(Control parent, Float2 location)
         {
-            if (base.ContainsPoint(ref location))
+            // Remove last separator to make context menu look better
+            int lastIndex = _panel.Children.Count - 1;
+            if (lastIndex >= 0 && _panel.Children[lastIndex] is ContextMenuSeparator separator)
+                separator.Dispose();
+
+            base.Show(parent, location);
+        }
+
+        /// <inheritdoc />
+        public override bool ContainsPoint(ref Float2 location, bool precise)
+        {
+            if (base.ContainsPoint(ref location, precise))
                 return true;
 
             var cLocation = location - Location;
             for (int i = 0; i < _panel.Children.Count; i++)
             {
-                if (_panel.Children[i].ContainsPoint(ref cLocation))
+                if (_panel.Children[i].ContainsPoint(ref cLocation, precise))
                     return true;
             }
 
@@ -385,10 +391,12 @@ namespace FlaxEditor.GUI.ContextMenu
             float height = _itemsAreaMargin.Height;
             int itemsLeft = MaximumItemsInViewCount;
             int overflowItemCount = 0;
+            int itemsCount = 0;
             for (int i = 0; i < _panel.Children.Count; i++)
             {
                 if (_panel.Children[i] is ContextMenuItem item && item.Visible)
                 {
+                    itemsCount++;
                     if (itemsLeft > 0)
                     {
                         height += item.Height + _itemsMargin.Height;
@@ -401,6 +409,8 @@ namespace FlaxEditor.GUI.ContextMenu
                     maxWidth = Mathf.Max(maxWidth, item.MinimumWidth);
                 }
             }
+            if (itemsCount != 0)
+                height -= _itemsMargin.Height; // Remove item margin from top and bottom
             maxWidth = Mathf.Max(maxWidth + 20, MinimumWidth);
 
             // Move child arrows to accommodate scroll bar showing 
