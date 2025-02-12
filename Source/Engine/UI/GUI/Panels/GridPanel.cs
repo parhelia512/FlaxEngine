@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 
@@ -8,6 +8,7 @@ namespace FlaxEngine.GUI
     /// A panel that divides up available space between all of its children.
     /// </summary>
     /// <seealso cref="FlaxEngine.GUI.ContainerControl" />
+    [ActorToolbox("GUI")]
     public class GridPanel : ContainerControl
     {
         private Margin _slotPadding;

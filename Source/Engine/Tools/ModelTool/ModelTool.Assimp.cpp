@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if COMPILE_WITH_MODEL_TOOL && USE_ASSIMP
 
@@ -9,6 +9,7 @@
 #include "Engine/Platform/FileSystem.h"
 #include "Engine/Platform/File.h"
 #include "Engine/Tools/TextureTool/TextureTool.h"
+#include "Engine/Utilities/AnsiPathTempFile.h"
 
 // Import Assimp library
 // Source: https://github.com/assimp/assimp
@@ -22,21 +23,20 @@
 #include <ThirdParty/assimp/LogStream.hpp>
 #include <ThirdParty/assimp/DefaultLogger.hpp>
 #include <ThirdParty/assimp/Logger.hpp>
-using namespace Assimp;
 
-class AssimpLogStream : public LogStream
+class AssimpLogStream : public Assimp::LogStream
 {
 public:
     AssimpLogStream()
     {
-        DefaultLogger::create("");
-        DefaultLogger::get()->attachStream(this);
+        Assimp::DefaultLogger::create("");
+        Assimp::DefaultLogger::get()->attachStream(this);
     }
 
     ~AssimpLogStream()
     {
-        DefaultLogger::get()->detatchStream(this);
-        DefaultLogger::kill();
+        Assimp::DefaultLogger::get()->detachStream(this);
+        Assimp::DefaultLogger::kill();
     }
 
     void write(const char* message) override
@@ -147,7 +147,7 @@ struct AssimpBone
 
 struct AssimpImporterData
 {
-    Importer AssimpImporter;
+    Assimp::Importer AssimpImporter;
     AssimpLogStream AssimpLogStream;
     const String Path;
     const aiScene* Scene = nullptr;
@@ -157,7 +157,7 @@ struct AssimpImporterData
     Array<AssimpBone> Bones;
     Dictionary<int32, Array<int32>> MeshIndexToNodeIndex;
 
-    AssimpImporterData(const char* path, const ModelTool::Options& options)
+    AssimpImporterData(const StringView& path, const ModelTool::Options& options)
         : Path(path)
         , Options(options)
     {
@@ -483,7 +483,6 @@ bool ProcessMesh(ModelData& result, AssimpImporterData& data, const aiMesh* aMes
             }
         }
     }
-
     return false;
 }
 
@@ -645,62 +644,29 @@ bool ImportMesh(int32 index, ModelData& result, AssimpImporterData& data, String
 
         // Link mesh
         meshData->NodeIndex = nodeIndex;
+        AssimpNode* curNode = &data.Nodes[meshData->NodeIndex];
+        Vector3 translation = Vector3::Zero;
+        Vector3 scale = Vector3::One;
+        Quaternion rotation = Quaternion::Identity;
+
+        while (true)
+        {
+            translation += curNode->LocalTransform.Translation;
+            scale *= curNode->LocalTransform.Scale;
+            rotation *= curNode->LocalTransform.Orientation;
+
+            if (curNode->ParentIndex == -1)
+                break;
+            curNode = &data.Nodes[curNode->ParentIndex];
+        }
+
+        meshData->OriginTranslation = translation;
+        meshData->OriginOrientation = rotation;
+        meshData->Scaling = scale;
+
         if (result.LODs.Count() <= lodIndex)
             result.LODs.Resize(lodIndex + 1);
         result.LODs[lodIndex].Meshes.Add(meshData);
-    }
-
-    auto root = data.Scene->mRootNode;
-    Array<Transform> points;
-    if (root->mNumChildren == 0)
-    {
-        aiQuaternion aiQuat;
-        aiVector3D aiPos;
-        aiVector3D aiScale;
-        root->mTransformation.Decompose(aiScale, aiQuat, aiPos);
-        auto quat = ToQuaternion(aiQuat);
-        auto pos = ToFloat3(aiPos);
-        auto scale = ToFloat3(aiScale);
-        Transform trans = Transform(pos, quat, scale);
-        points.Add(trans);
-    }
-    else
-    {
-        for (unsigned int j = 0; j < root->mNumChildren; j++)
-        {
-            aiQuaternion aiQuat;
-            aiVector3D aiPos;
-            aiVector3D aiScale;
-            root->mChildren[j]->mTransformation.Decompose(aiScale, aiQuat, aiPos);
-            auto quat = ToQuaternion(aiQuat);
-            auto pos = ToFloat3(aiPos);
-            auto scale = ToFloat3(aiScale);
-            Transform trans = Transform(pos, quat, scale);
-            points.Add(trans);
-        }
-    }
-
-    Float3 translation = Float3::Zero;
-    Float3 scale = Float3::Zero;
-    Quaternion orientation = Quaternion::Identity;
-    for (auto point : points)
-    {
-        translation += point.Translation;
-        scale += point.Scale;
-        orientation *= point.Orientation;
-    }
-
-    if (points.Count() > 0)
-    {
-        meshData->OriginTranslation = translation / (float)points.Count();
-        meshData->OriginOrientation = Quaternion::Invert(orientation);
-        meshData->Scaling = scale / (float)points.Count();
-    }
-    else
-    {
-        meshData->OriginTranslation = translation;
-        meshData->OriginOrientation = Quaternion::Invert(orientation);
-        meshData->Scaling = Float3(1);
     }
 
     return false;
@@ -769,7 +735,7 @@ void ImportAnimation(int32 index, ModelData& data, AssimpImporterData& importerD
     }
 }
 
-bool ModelTool::ImportDataAssimp(const char* path, ModelData& data, Options& options, String& errorMsg)
+bool ModelTool::ImportDataAssimp(const String& path, ModelData& data, Options& options, String& errorMsg)
 {
     static bool AssimpInited = false;
     if (!AssimpInited)
@@ -790,6 +756,7 @@ bool ModelTool::ImportDataAssimp(const char* path, ModelData& data, Options& opt
             aiProcess_GenUVCoords |
             aiProcess_FindDegenerates |
             aiProcess_FindInvalidData |
+            aiProcess_GlobalScale |
             //aiProcess_ValidateDataStructure |
             aiProcess_ConvertToLeftHanded;
     if (importMeshes)
@@ -798,6 +765,8 @@ bool ModelTool::ImportDataAssimp(const char* path, ModelData& data, Options& opt
             flags |= aiProcess_FixInfacingNormals | aiProcess_GenSmoothNormals;
         if (options.CalculateTangents)
             flags |= aiProcess_CalcTangentSpace;
+        if (options.ReverseWindingOrder)
+            flags &= ~aiProcess_FlipWindingOrder;
         if (options.OptimizeMeshes)
             flags |= aiProcess_OptimizeMeshes | aiProcess_SplitLargeMeshes | aiProcess_ImproveCacheLocality;
         if (options.MergeMeshes)
@@ -807,6 +776,7 @@ bool ModelTool::ImportDataAssimp(const char* path, ModelData& data, Options& opt
     // Setup import options
     context.AssimpImporter.SetPropertyFloat(AI_CONFIG_PP_GSN_MAX_SMOOTHING_ANGLE, options.SmoothingNormalsAngle);
     context.AssimpImporter.SetPropertyFloat(AI_CONFIG_PP_CT_MAX_SMOOTHING_ANGLE, options.SmoothingTangentsAngle);
+    context.AssimpImporter.SetPropertyFloat(AI_CONFIG_GLOBAL_SCALE_FACTOR_KEY, 100.0f); // Convert to cm
     //context.AssimpImporter.SetPropertyInteger(AI_CONFIG_PP_SLM_TRIANGLE_LIMIT, MAX_uint16);
     context.AssimpImporter.SetPropertyBool(AI_CONFIG_IMPORT_FBX_READ_CAMERAS, false);
     context.AssimpImporter.SetPropertyBool(AI_CONFIG_IMPORT_FBX_READ_LIGHTS, false);
@@ -816,7 +786,10 @@ bool ModelTool::ImportDataAssimp(const char* path, ModelData& data, Options& opt
     context.AssimpImporter.SetPropertyBool(AI_CONFIG_IMPORT_FBX_OPTIMIZE_EMPTY_ANIMATION_CURVES, true);
 
     // Import file
-    context.Scene = context.AssimpImporter.ReadFile(path, flags);
+    {
+        AnsiPathTempFile tempFile(path);
+        context.Scene = context.AssimpImporter.ReadFile(tempFile.Path.Get(), flags);
+    }
     if (context.Scene == nullptr)
     {
         LOG_STR(Warning, String(context.AssimpImporter.GetErrorString()));
@@ -827,14 +800,14 @@ bool ModelTool::ImportDataAssimp(const char* path, ModelData& data, Options& opt
     }
 
     // Create root node
-    AssimpNode& rootNode = context.Nodes.AddOne();
+    /*AssimpNode& rootNode = context.Nodes.AddOne();
     rootNode.ParentIndex = -1;
     rootNode.LodIndex = 0;
-    rootNode.Name = TEXT("Root");
     rootNode.LocalTransform = Transform::Identity;
+    rootNode.Name = TEXT("Root");*/
 
     // Process imported scene nodes
-    ProcessNodes(context, context.Scene->mRootNode, 0);
+    ProcessNodes(context, context.Scene->mRootNode, -1);
 
     // Import materials
     if (ImportMaterials(data, context, errorMsg))

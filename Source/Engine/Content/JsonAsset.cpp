@@ -1,8 +1,9 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "JsonAsset.h"
 #if USE_EDITOR
 #include "Engine/Platform/File.h"
+#include "Engine/Platform/FileSystem.h"
 #include "Engine/Core/Types/DataContainer.h"
 #include "Engine/Level/Level.h"
 #else
@@ -109,41 +110,55 @@ uint64 JsonAssetBase::GetMemoryUsage() const
 
 #if USE_EDITOR
 
-void FindIds(ISerializable::DeserializeStream& node, Array<Guid>& output)
+void FindIds(ISerializable::DeserializeStream& node, Array<Guid>& output, Array<String>& files, rapidjson_flax::Value* nodeName = nullptr)
 {
     if (node.IsObject())
     {
         for (auto i = node.MemberBegin(); i != node.MemberEnd(); ++i)
         {
-            FindIds(i->value, output);
+            FindIds(i->value, output, files, &i->name);
         }
     }
     else if (node.IsArray())
     {
         for (rapidjson::SizeType i = 0; i < node.Size(); i++)
         {
-            FindIds(node[i], output);
+            FindIds(node[i], output, files);
         }
     }
-    else if (node.IsString())
+    else if (node.IsString() && node.GetStringLength() != 0)
     {
         if (node.GetStringLength() == 32)
         {
             // Try parse as Guid in format `N` (32 hex chars)
             Guid id;
             if (!Guid::Parse(node.GetStringAnsiView(), id))
+            {
                 output.Add(id);
+                return;
+            }
+        }
+        if (node.GetStringLength() < 512 &&
+            (!nodeName || nodeName->GetStringAnsiView() != "ImportPath")) // Ignore path in ImportPath from ModelPrefab (TODO: resave prefabs/scenes before cooking to get rid of editor-only data)
+        {
+            // Try to detect file paths
+            String path = node.GetText();
+            if (FileSystem::FileExists(path))
+            {
+                files.Add(MoveTemp(path));
+            }
         }
     }
 }
 
-void JsonAssetBase::GetReferences(const StringAnsiView& json, Array<Guid>& output)
+void JsonAssetBase::GetReferences(const StringAnsiView& json, Array<Guid>& assets)
 {
     ISerializable::SerializeDocument document;
     document.Parse(json.Get(), json.Length());
     if (document.HasParseError())
         return;
-    FindIds(document, output);
+    Array<String> files;
+    FindIds(document, assets, files);
 }
 
 bool JsonAssetBase::Save(const StringView& path) const
@@ -207,7 +222,7 @@ bool JsonAssetBase::Save(JsonWriter& writer) const
     return false;
 }
 
-void JsonAssetBase::GetReferences(Array<Guid>& output) const
+void JsonAssetBase::GetReferences(Array<Guid>& assets, Array<String>& files) const
 {
     if (Data == nullptr)
         return;
@@ -219,7 +234,7 @@ void JsonAssetBase::GetReferences(Array<Guid>& output) const
     // It produces many invalid ids (like refs to scene objects).
     // But it's super fast, super low-memory and doesn't involve any advanced systems integration.
 
-    FindIds(*Data, output);
+    FindIds(*Data, assets, files);
 }
 
 #endif
@@ -393,34 +408,57 @@ bool JsonAsset::CreateInstance()
     if (typeHandle)
     {
         auto& type = typeHandle.GetType();
+
+        // Ensure that object can deserialized
+        const ScriptingType::InterfaceImplementation* interface = type.GetInterface(ISerializable::TypeInitializer);
+        if (!interface)
+        {
+            LOG(Warning, "Cannot deserialize {0} from Json Asset because it doesn't implement ISerializable interface.", type.ToString());
+            return false;
+        }
+        auto modifier = Cache::ISerializeModifier.Get();
+        modifier->EngineBuild = DataEngineBuild;
+
+        // Create object
         switch (type.Type)
         {
         case ScriptingTypes::Class:
+        case ScriptingTypes::Structure:
         {
-            // Ensure that object can deserialized
-            const ScriptingType::InterfaceImplementation* interface = type.GetInterface(ISerializable::TypeInitializer);
-            if (!interface)
-            {
-                LOG(Warning, "Cannot deserialize {0} from Json Asset because it doesn't implement ISerializable interface.", type.ToString());
-                break;
-            }
-
-            // Allocate object
             const auto instance = Allocator::Allocate(type.Size);
             if (!instance)
                 return true;
             Instance = instance;
-            InstanceType = typeHandle;
-            _dtor = type.Class.Dtor;
-            type.Class.Ctor(instance);
+            if (type.Type == ScriptingTypes::Class)
+            {
+                _dtor = type.Class.Dtor;
+                type.Class.Ctor(instance);
+            }
+            else
+            {
+                _dtor = type.Struct.Dtor;
+                type.Struct.Ctor(instance);
+            }
 
             // Deserialize object
-            auto modifier = Cache::ISerializeModifier.Get();
-            modifier->EngineBuild = DataEngineBuild;
             ((ISerializable*)((byte*)instance + interface->VTableOffset))->Deserialize(*Data, modifier.Value);
             break;
         }
+        case ScriptingTypes::Script:
+        {
+            const ScriptingObjectSpawnParams params(Guid::New(), typeHandle);
+            const auto instance = type.Script.Spawn(params);
+            if (!instance)
+                return true;
+            Instance = instance;
+            _dtor = nullptr;
+
+            // Deserialize object
+            ToInterface<ISerializable>(instance)->Deserialize(*Data, modifier.Value);
+            break;
         }
+        }
+        InstanceType = typeHandle;
     }
 
     return false;
@@ -441,13 +479,20 @@ void JsonAsset::DeleteInstance()
     }
 
     // C++ instance
-    if (!Instance || !_dtor)
+    if (!Instance)
         return;
-    _dtor(Instance);
+    if (_dtor)
+    {
+        _dtor(Instance);
+        _dtor = nullptr;
+        Allocator::Free(Instance);
+    }
+    else
+    {
+        Delete((ScriptingObject*)Instance);
+    }
     InstanceType = ScriptingTypeHandle();
-    Allocator::Free(Instance);
     Instance = nullptr;
-    _dtor = nullptr;
 }
 
 #if USE_EDITOR

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System.Collections.Generic;
 using FlaxEditor.Content;
@@ -139,8 +139,8 @@ namespace FlaxEditor.Windows.Search
             {
                 var item = items[i];
                 SearchItem searchItem;
-                if (item.Item is AssetItem assetItem)
-                    searchItem = new AssetSearchItem(item.Name, item.Type, assetItem, this, itemsWidth, itemHeight);
+                if (item.Item is ContentItem contentItem)
+                    searchItem = new ContentSearchItem(item.Name, item.Type, contentItem, this, itemsWidth, itemHeight);
                 else
                     searchItem = new SearchItem(item.Name, item.Type, item.Item, this, itemsWidth, itemHeight);
                 searchItem.Y = i * itemHeight;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Engine/Scripting/Types.h"
 
@@ -7,6 +7,7 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Types/DateTime.h"
 #include "Engine/Core/Types/TimeSpan.h"
+#include "Engine/Core/Types/Stopwatch.h"
 #include "Engine/Platform/File.h"
 #include "Engine/Platform/FileSystem.h"
 #include "Engine/Engine/Globals.h"
@@ -794,6 +795,12 @@ MClass* MCore::Array::GetClass(MClass* elementKlass)
     return FindClass(monoClass);
 }
 
+MClass* MCore::Array::GetArrayClass(const MArray* obj)
+{
+    CRASH; // Not applicable
+    return nullptr;
+}
+
 int32 MCore::Array::GetLength(const MArray* obj)
 {
     return (int32)mono_array_length((MonoArray*)obj);
@@ -1089,7 +1096,7 @@ bool MAssembly::Load(MonoImage* monoImage)
     Unload();
 
     // Start
-    const auto startTime = DateTime::NowUTC();
+    Stopwatch stopwatch;
     OnLoading();
 
     // Load
@@ -1103,7 +1110,7 @@ bool MAssembly::Load(MonoImage* monoImage)
     _hasCachedClasses = false;
 
     // End
-    OnLoaded(startTime);
+    OnLoaded(stopwatch);
     return false;
 }
 
@@ -1510,10 +1517,10 @@ const Array<MClass*>& MClass::GetInterfaces() const
     return _interfaces;
 }
 
-bool MClass::HasAttribute(const MClass* monoClass) const
+bool MClass::HasAttribute(const MClass* klass) const
 {
     MonoCustomAttrInfo* attrInfo = GET_CUSTOM_ATTR();
-    return attrInfo != nullptr && mono_custom_attrs_has_attr(attrInfo, monoClass->GetNative()) != 0;
+    return attrInfo != nullptr && mono_custom_attrs_has_attr(attrInfo, klass->GetNative()) != 0;
 }
 
 bool MClass::HasAttribute() const
@@ -1522,10 +1529,10 @@ bool MClass::HasAttribute() const
     return attrInfo && attrInfo->num_attrs > 0;
 }
 
-MObject* MClass::GetAttribute(const MClass* monoClass) const
+MObject* MClass::GetAttribute(const MClass* klass) const
 {
     MonoCustomAttrInfo* attrInfo = GET_CUSTOM_ATTR();
-    return attrInfo ? mono_custom_attrs_get_attr(attrInfo, monoClass->GetNative()) : nullptr;
+    return attrInfo ? mono_custom_attrs_get_attr(attrInfo, klass->GetNative()) : nullptr;
 }
 
 const Array<MObject*>& MClass::GetAttributes() const
@@ -1611,14 +1618,14 @@ MMethod* MEvent::GetRemoveMethod() const
     return _removeMethod;
 }
 
-bool MEvent::HasAttribute(MClass* monoClass) const
+bool MEvent::HasAttribute(const MClass* klass) const
 {
     MonoClass* parentClass = mono_event_get_parent(_monoEvent);
     MonoCustomAttrInfo* attrInfo = mono_custom_attrs_from_event(parentClass, _monoEvent);
     if (attrInfo == nullptr)
         return false;
 
-    const bool hasAttr = mono_custom_attrs_has_attr(attrInfo, monoClass->GetNative()) != 0;
+    const bool hasAttr = mono_custom_attrs_has_attr(attrInfo, klass->GetNative()) != 0;
     mono_custom_attrs_free(attrInfo);
     return hasAttr;
 }
@@ -1639,14 +1646,14 @@ bool MEvent::HasAttribute() const
     return false;
 }
 
-MObject* MEvent::GetAttribute(MClass* monoClass) const
+MObject* MEvent::GetAttribute(const MClass* klass) const
 {
     MonoClass* parentClass = mono_event_get_parent(_monoEvent);
     MonoCustomAttrInfo* attrInfo = mono_custom_attrs_from_event(parentClass, _monoEvent);
     if (attrInfo == nullptr)
         return nullptr;
 
-    MonoObject* foundAttr = mono_custom_attrs_get_attr(attrInfo, monoClass->GetNative());
+    MonoObject* foundAttr = mono_custom_attrs_get_attr(attrInfo, klass->GetNative());
     mono_custom_attrs_free(attrInfo);
     return foundAttr;
 }
@@ -1764,14 +1771,14 @@ void MField::SetValue(MObject* instance, void* value) const
     mono_field_set_value(instance, _monoField, value);
 }
 
-bool MField::HasAttribute(MClass* monoClass) const
+bool MField::HasAttribute(const MClass* klass) const
 {
     MonoClass* parentClass = mono_field_get_parent(_monoField);
     MonoCustomAttrInfo* attrInfo = mono_custom_attrs_from_field(parentClass, _monoField);
     if (attrInfo == nullptr)
         return false;
 
-    const bool hasAttr = mono_custom_attrs_has_attr(attrInfo, monoClass->GetNative()) != 0;
+    const bool hasAttr = mono_custom_attrs_has_attr(attrInfo, klass->GetNative()) != 0;
     mono_custom_attrs_free(attrInfo);
     return hasAttr;
 }
@@ -1792,14 +1799,14 @@ bool MField::HasAttribute() const
     return false;
 }
 
-MObject* MField::GetAttribute(MClass* monoClass) const
+MObject* MField::GetAttribute(const MClass* klass) const
 {
     MonoClass* parentClass = mono_field_get_parent(_monoField);
     MonoCustomAttrInfo* attrInfo = mono_custom_attrs_from_field(parentClass, _monoField);
     if (attrInfo == nullptr)
         return nullptr;
 
-    MonoObject* foundAttr = mono_custom_attrs_get_attr(attrInfo, monoClass->GetNative());
+    MonoObject* foundAttr = mono_custom_attrs_get_attr(attrInfo, klass->GetNative());
     mono_custom_attrs_free(attrInfo);
     return foundAttr;
 }
@@ -1940,13 +1947,13 @@ bool MMethod::GetParameterIsOut(int32 paramIdx) const
     return mono_signature_param_is_out(sig, paramIdx) != 0;
 }
 
-bool MMethod::HasAttribute(MClass* monoClass) const
+bool MMethod::HasAttribute(const MClass* klass) const
 {
     MonoCustomAttrInfo* attrInfo = mono_custom_attrs_from_method(_monoMethod);
     if (attrInfo == nullptr)
         return false;
 
-    const bool hasAttr = mono_custom_attrs_has_attr(attrInfo, monoClass->GetNative()) != 0;
+    const bool hasAttr = mono_custom_attrs_has_attr(attrInfo, klass->GetNative()) != 0;
     mono_custom_attrs_free(attrInfo);
     return hasAttr;
 }
@@ -1966,13 +1973,13 @@ bool MMethod::HasAttribute() const
     return false;
 }
 
-MObject* MMethod::GetAttribute(MClass* monoClass) const
+MObject* MMethod::GetAttribute(const MClass* klass) const
 {
     MonoCustomAttrInfo* attrInfo = mono_custom_attrs_from_method(_monoMethod);
     if (attrInfo == nullptr)
         return nullptr;
 
-    MonoObject* foundAttr = mono_custom_attrs_get_attr(attrInfo, monoClass->GetNative());
+    MonoObject* foundAttr = mono_custom_attrs_get_attr(attrInfo, klass->GetNative());
     mono_custom_attrs_free(attrInfo);
     return foundAttr;
 }
@@ -2067,14 +2074,14 @@ void MProperty::SetValue(MObject* instance, void* value, MObject** exception) co
     mono_property_set_value(_monoProperty, instance, params, exception);
 }
 
-bool MProperty::HasAttribute(MClass* monoClass) const
+bool MProperty::HasAttribute(const MClass* klass) const
 {
     MonoClass* parentClass = mono_property_get_parent(_monoProperty);
     MonoCustomAttrInfo* attrInfo = mono_custom_attrs_from_property(parentClass, _monoProperty);
     if (attrInfo == nullptr)
         return false;
 
-    const bool hasAttr = mono_custom_attrs_has_attr(attrInfo, monoClass->GetNative()) != 0;
+    const bool hasAttr = mono_custom_attrs_has_attr(attrInfo, klass->GetNative()) != 0;
     mono_custom_attrs_free(attrInfo);
     return hasAttr;
 }
@@ -2095,14 +2102,14 @@ bool MProperty::HasAttribute() const
     return false;
 }
 
-MObject* MProperty::GetAttribute(MClass* monoClass) const
+MObject* MProperty::GetAttribute(const MClass* klass) const
 {
     MonoClass* parentClass = mono_property_get_parent(_monoProperty);
     MonoCustomAttrInfo* attrInfo = mono_custom_attrs_from_property(parentClass, _monoProperty);
     if (attrInfo == nullptr)
         return nullptr;
 
-    MonoObject* foundAttr = mono_custom_attrs_get_attr(attrInfo, monoClass->GetNative());
+    MonoObject* foundAttr = mono_custom_attrs_get_attr(attrInfo, klass->GetNative());
     mono_custom_attrs_free(attrInfo);
     return foundAttr;
 }

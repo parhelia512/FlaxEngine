@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -95,6 +95,7 @@ namespace FlaxEditor.Windows
                     Bounds = new Rectangle(nameLabel.X, tmp1, nameLabel.Width, Height - tmp1 - margin),
                 };
 
+                var xOffset = nameLabel.Width;
                 string versionString = string.Empty;
                 if (desc.IsAlpha)
                     versionString = "ALPHA ";
@@ -109,7 +110,7 @@ namespace FlaxEditor.Windows
                     AnchorPreset = AnchorPresets.TopRight,
                     Text = versionString,
                     Parent = this,
-                    Bounds = new Rectangle(Width - 140 - margin, margin, 140, 14),
+                    Bounds = new Rectangle(Width - 140 - margin - xOffset, margin, 140, 14),
                 };
 
                 string url = null;
@@ -129,7 +130,7 @@ namespace FlaxEditor.Windows
                     AnchorPreset = AnchorPresets.TopRight,
                     Text = desc.Author,
                     Parent = this,
-                    Bounds = new Rectangle(Width - authorWidth - margin, versionLabel.Bottom + margin, authorWidth, 14),
+                    Bounds = new Rectangle(Width - authorWidth - margin - xOffset, versionLabel.Bottom + margin, authorWidth, 14),
                 };
                 if (url != null)
                 {
@@ -365,13 +366,13 @@ namespace FlaxEditor.Windows
             }
 
             var clonePath = Path.Combine(Globals.ProjectFolder, "Plugins", pluginName);
-            if (!Directory.Exists(clonePath))
-                Directory.CreateDirectory(clonePath);
-            else
+            if (Directory.Exists(clonePath))
             {
                 Editor.LogError("Plugin Name is already used. Pick a different Name.");
                 return;
             }
+            Directory.CreateDirectory(clonePath);
+            
             try
             {
                 // Start git clone
@@ -383,7 +384,32 @@ namespace FlaxEditor.Windows
                     LogOutput = true,
                     WaitForEnd = true
                 };
-                Platform.CreateProcess(ref settings);
+                var asSubmodule = Directory.Exists(Path.Combine(Globals.ProjectFolder, ".git"));
+                if (asSubmodule)
+                {
+                    // Clone as submodule to the existing repo
+                    settings.Arguments = $"submodule add {gitPath} \"Plugins/{pluginName}\"";
+                    
+                    // Submodule add need the target folder to not exist
+                    Directory.Delete(clonePath);
+                }
+                int result = Platform.CreateProcess(ref settings);
+                if (result != 0)
+                    throw new Exception($"'{settings.FileName} {settings.Arguments}' failed with result {result}");
+
+                // Ensure that cloned repo exists
+                var checkPath = Path.Combine(clonePath, ".git");
+                if (asSubmodule)
+                {
+                    if (!File.Exists(checkPath))
+                        throw new Exception("Failed to clone repo.");
+                }
+                else
+                {
+                    if (!Directory.Exists(checkPath))
+                        throw new Exception("Failed to clone repo.");
+
+                }
             }
             catch (Exception e)
             {
@@ -671,11 +697,11 @@ namespace FlaxEditor.Windows
             Editor.Log($"Using plugin code type name: {pluginCodeName}");
 
             var oldPluginPath = Path.Combine(extractPath, "ExamplePlugin-master");
-            var newPluginPath = Path.Combine(extractPath, pluginName);
+            var newPluginPath = Path.Combine(extractPath, pluginCodeName);
             Directory.Move(oldPluginPath, newPluginPath);
 
             var oldFlaxProjFile = Path.Combine(newPluginPath, "ExamplePlugin.flaxproj");
-            var newFlaxProjFile = Path.Combine(newPluginPath, $"{pluginName}.flaxproj");
+            var newFlaxProjFile = Path.Combine(newPluginPath, $"{pluginCodeName}.flaxproj");
             File.Move(oldFlaxProjFile, newFlaxProjFile);
 
             var readme = Path.Combine(newPluginPath, "README.md");
@@ -687,7 +713,7 @@ namespace FlaxEditor.Windows
 
             // Flax plugin project file
             var flaxPluginProjContents = JsonSerializer.Deserialize<ProjectInfo>(await File.ReadAllTextAsync(newFlaxProjFile));
-            flaxPluginProjContents.Name = pluginName;
+            flaxPluginProjContents.Name = pluginCodeName;
             if (!string.IsNullOrEmpty(pluginVersion))
                 flaxPluginProjContents.Version = new Version(pluginVersion);
             if (!string.IsNullOrEmpty(companyName))
@@ -751,7 +777,7 @@ namespace FlaxEditor.Windows
             }
             Editor.Log($"Plugin project {pluginName} has successfully been created.");
 
-            await AddReferenceToProject(pluginName, pluginName);
+            await AddReferenceToProject(pluginCodeName, pluginCodeName);
             MessageBox.Show($"{pluginName} has been successfully created. Restart editor for changes to take effect.", "Plugin Project Created", MessageBoxButtons.OK);
         }
 
@@ -775,8 +801,12 @@ namespace FlaxEditor.Windows
                         var pluginModuleScriptPath = Path.Combine(subDir, pluginModuleName + ".Build.cs");
                         if (File.Exists(pluginModuleScriptPath))
                         {
-                            gameScriptContents = gameScriptContents.Insert(insertLocation, $"\n        options.PublicDependencies.Add(\"{pluginModuleName}\");");
-                            modifiedAny = true;
+                            var text = await File.ReadAllTextAsync(pluginModuleScriptPath);
+                            if (!text.Contains("GameEditorModule", StringComparison.OrdinalIgnoreCase))
+                            {
+                                gameScriptContents = gameScriptContents.Insert(insertLocation, $"\n        options.PublicDependencies.Add(\"{pluginModuleName}\");");
+                                modifiedAny = true;
+                            }
                         }
                     }
 

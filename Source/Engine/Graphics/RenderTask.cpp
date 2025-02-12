@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "RenderTask.h"
 #include "RenderBuffers.h"
@@ -42,13 +42,13 @@ void RenderTask::DrawAll()
     // Sort tasks (by Order property)
     Sorting::QuickSortObj(Tasks.Get(), Tasks.Count());
 
-    // Render all that shit
+    // Render all tasks
     for (auto task : Tasks)
     {
         if (task->CanDraw())
-        {
             task->OnDraw();
-        }
+        else
+            task->OnIdle();
     }
 }
 
@@ -82,6 +82,10 @@ void RenderTask::OnDraw()
     OnBegin(context);
     OnRender(context);
     OnEnd(context);
+}
+
+void RenderTask::OnIdle()
+{
 }
 
 void RenderTask::OnBegin(GPUContext* context)
@@ -325,6 +329,9 @@ void SceneRenderTask::OnPostRender(GPUContext* context, RenderContext& renderCon
     OnCollectDrawCalls(renderContextBatch, SceneRendering::PostRender);
 
     PostRender(context, renderContext);
+
+    if (Buffers)
+        Buffers->ReleaseUnusedMemory();
 }
 
 Viewport SceneRenderTask::GetViewport() const
@@ -403,6 +410,9 @@ void SceneRenderTask::OnEnd(GPUContext* context)
     View.PrevView = View.View;
     View.PrevProjection = View.Projection;
     View.PrevViewProjection = View.ViewProjection();
+
+    // Remove jitter from the projection (in case it's unmodified by gameplay eg. due to missing camera)
+    View.Projection = View.NonJitteredProjection;
 }
 
 bool SceneRenderTask::Resize(int32 width, int32 height)
@@ -419,6 +429,14 @@ bool SceneRenderTask::CanDraw() const
     if (Output && !Output->IsAllocated())
         return false;
     return RenderTask::CanDraw();
+}
+
+void SceneRenderTask::OnIdle()
+{
+    RenderTask::OnIdle();
+
+    if (Buffers)
+        Buffers->ReleaseUnusedMemory();
 }
 
 MainRenderTask::MainRenderTask(const SpawnParams& params)

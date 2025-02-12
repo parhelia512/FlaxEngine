@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -8,7 +8,7 @@
 /// <summary>
 /// Contains a single GUI control (on C# side).
 /// </summary>
-API_CLASS(Sealed, Attributes="ActorContextMenu(\"New/UI/UI Control\"), ActorToolbox(\"GUI\")")
+API_CLASS(Sealed, Attributes="ActorContextMenu(\"New/UI/UI Control\"), ActorToolbox(\"GUI\", \"Empty UIControl\")")
 class FLAXENGINE_API UIControl : public Actor
 {
     DECLARE_SCENE_OBJECT(UIControl);
@@ -30,7 +30,7 @@ protected:
     void OnBeginPlay() override;
     void OnEndPlay() override;
     void OnOrderInParentChanged() override;
-    void OnActiveInTreeChanged() override;
+    void OnActiveChanged() override;
 
 private:
 #if !COMPILE_WITHOUT_CSHARP

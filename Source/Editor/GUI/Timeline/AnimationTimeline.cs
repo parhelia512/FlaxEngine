@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEditor.Content;
@@ -130,9 +130,9 @@ namespace FlaxEditor.GUI.Timeline
         public override void OnPlay()
         {
             var time = CurrentTime;
-            _preview.Play();
             if (_preview != null)
             {
+                _preview.Play();
                 Editor.Internal_SetAnimationTime(Object.GetUnmanagedPtr(_preview.PreviewActor), time);
             }
 

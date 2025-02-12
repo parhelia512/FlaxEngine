@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -21,6 +21,27 @@ namespace Flax.Build.NativeCpp
         /// Projects generation (not actual build, just build setup evaluation).
         /// </summary>
         GenerateProject = 1,
+    }
+
+    /// <summary>
+    /// Precompiled Headers Files (PCH) usage modes.
+    /// </summary>
+    public enum PrecompiledHeaderFileUsage
+    {
+        /// <summary>
+        /// Precompiled Headers Files (PCH) feature is disabled.
+        /// </summary>
+        None,
+
+        /// <summary>
+        /// Enables creation and usage of the header file. The input source PCH will be precompiled and included.
+        /// </summary>
+        CreateManual,
+
+        /// <summary>
+        /// Enables usage of the header file. The input source PCH will be included in the build (assuming it exists).
+        /// </summary>
+        UseManual,
     }
 
     /// <summary>
@@ -215,6 +236,11 @@ namespace Flax.Build.NativeCpp
             public HashSet<string> Analyzers;
 
             /// <summary>
+            /// The specific warnings to ignore.
+            /// </summary>
+            public HashSet<string> IgnoreSpecificWarnings;
+
+            /// <summary>
             /// True if ignore compilation warnings due to missing code documentation comments.
             /// </summary>
             public bool IgnoreMissingDocumentationWarnings;
@@ -244,6 +270,7 @@ namespace Flax.Build.NativeCpp
                 FileReferences.AddRange(other.FileReferences);
                 Analyzers.AddRange(other.Analyzers);
                 IgnoreMissingDocumentationWarnings |= other.IgnoreMissingDocumentationWarnings;
+                IgnoreSpecificWarnings.AddRange(other.IgnoreSpecificWarnings);
             }
         }
 
@@ -317,6 +344,7 @@ namespace Flax.Build.NativeCpp
             },
             FileReferences = new HashSet<string>(),
             Analyzers = new HashSet<string>(),
+            IgnoreSpecificWarnings = new HashSet<string>(),
         };
 
         /// <summary>

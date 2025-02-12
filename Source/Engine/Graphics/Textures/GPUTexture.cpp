@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "GPUTexture.h"
 #include "GPUTextureDescription.h"
@@ -15,6 +15,7 @@
 #include "Engine/Graphics/GPULimits.h"
 #include "Engine/Threading/ThreadPoolTask.h"
 #include "Engine/Graphics/GPUDevice.h"
+#include "Engine/Profiler/ProfilerCPU.h"
 #include "Engine/Scripting/Enums.h"
 
 namespace
@@ -141,6 +142,14 @@ GPUTextureDescription GPUTextureDescription::ToStagingReadback() const
     return copy;
 }
 
+GPUTextureDescription GPUTextureDescription::ToStaging() const
+{
+    auto copy = *this;
+    copy.Flags = GPUTextureFlags::None;
+    copy.Usage = GPUResourceUsage::Staging;
+    return copy;
+}
+
 bool GPUTextureDescription::Equals(const GPUTextureDescription& other) const
 {
     return Dimensions == other.Dimensions
@@ -158,29 +167,6 @@ bool GPUTextureDescription::Equals(const GPUTextureDescription& other) const
 
 String GPUTextureDescription::ToString() const
 {
-    // TODO: add tool to Format to string
-
-    String flags;
-    if (Flags == GPUTextureFlags::None)
-    {
-        flags = TEXT("None");
-    }
-    else
-    {
-        // TODO: create tool to auto convert flag enums to string
-
-#define CONVERT_FLAGS_FLAGS_2_STR(value) if (EnumHasAnyFlags(Flags, GPUTextureFlags::value)) { if (flags.HasChars()) flags += TEXT('|'); flags += TEXT(#value); }
-        CONVERT_FLAGS_FLAGS_2_STR(ShaderResource);
-        CONVERT_FLAGS_FLAGS_2_STR(RenderTarget);
-        CONVERT_FLAGS_FLAGS_2_STR(UnorderedAccess);
-        CONVERT_FLAGS_FLAGS_2_STR(DepthStencil);
-        CONVERT_FLAGS_FLAGS_2_STR(PerMipViews);
-        CONVERT_FLAGS_FLAGS_2_STR(PerSliceViews);
-        CONVERT_FLAGS_FLAGS_2_STR(ReadOnlyDepthView);
-        CONVERT_FLAGS_FLAGS_2_STR(BackBuffer);
-#undef CONVERT_FLAGS_FLAGS_2_STR
-    }
-
     return String::Format(TEXT("Size: {0}x{1}x{2}[{3}], Type: {4}, Mips: {5}, Format: {6}, MSAA: {7}, Flags: {8}, Usage: {9}"),
                           Width,
                           Height,
@@ -190,7 +176,7 @@ String GPUTextureDescription::ToString() const
                           MipLevels,
                           ScriptingEnum::ToString(Format),
                           ::ToString(MultiSampleLevel),
-                          flags,
+                          ScriptingEnum::ToStringFlags(Flags),
                           (int32)Usage);
 }
 
@@ -228,6 +214,11 @@ GPUTexture::GPUTexture()
 {
     // Keep description data clear (we use _desc.MipLevels to check if it's has been initated)
     _desc.Clear();
+}
+
+bool GPUTexture::IsStaging() const
+{
+    return _desc.Usage == GPUResourceUsage::StagingUpload || _desc.Usage == GPUResourceUsage::StagingReadback || _desc.Usage == GPUResourceUsage::Staging;
 }
 
 Float2 GPUTexture::Size() const
@@ -337,14 +328,12 @@ int32 GPUTexture::ComputeBufferOffset(int32 subresource, int32 rowAlign, int32 s
 int32 GPUTexture::ComputeBufferTotalSize(int32 rowAlign, int32 sliceAlign) const
 {
     int32 result = 0;
-
     for (int32 mipLevel = 0; mipLevel < MipLevels(); mipLevel++)
     {
         const int32 slicePitch = ComputeSlicePitch(mipLevel, rowAlign);
         const int32 depth = CalculateMipSize(Depth(), mipLevel);
         result += Math::AlignUp<int32>(slicePitch * depth, sliceAlign);
     }
-
     return result * ArraySize();
 }
 
@@ -355,23 +344,25 @@ int32 GPUTexture::ComputeSlicePitch(int32 mipLevel, int32 rowAlign) const
 
 int32 GPUTexture::ComputeRowPitch(int32 mipLevel, int32 rowAlign) const
 {
-    const int32 formatSize = PixelFormatExtensions::SizeInBytes(Format());
-    return Math::AlignUp<int32>(CalculateMipSize(Width(), mipLevel) * formatSize, rowAlign);
+    int32 mipWidth = CalculateMipSize(Width(), mipLevel);
+    int32 mipHeight = CalculateMipSize(Height(), mipLevel);
+    uint32 rowPitch, slicePitch;
+    RenderTools::ComputePitch(Format(), mipWidth, mipHeight, rowPitch, slicePitch);
+    return Math::AlignUp<int32>(rowPitch, rowAlign);
 }
 
 bool GPUTexture::Init(const GPUTextureDescription& desc)
 {
-    ASSERT(Math::IsInRange(desc.Width, 1, GPU_MAX_TEXTURE_SIZE)
-        && Math::IsInRange(desc.Height, 1, GPU_MAX_TEXTURE_SIZE)
-        && Math::IsInRange(desc.Depth, 1, GPU_MAX_TEXTURE_SIZE)
-        && Math::IsInRange(desc.ArraySize, 1, GPU_MAX_TEXTURE_ARRAY_SIZE)
-        && Math::IsInRange(desc.MipLevels, 1, GPU_MAX_TEXTURE_MIP_LEVELS));
-
     // Validate description
     const auto device = GPUDevice::Instance;
     if (desc.Usage == GPUResourceUsage::Dynamic)
     {
         LOG(Warning, "Cannot create texture. Dynamic textures are not supported. Description: {0}", desc.ToString());
+        return true;
+    }
+    if (desc.MipLevels < 0 || desc.MipLevels > GPU_MAX_TEXTURE_MIP_LEVELS)
+    {
+        LOG(Warning, "Cannot create texture. Invalid amount of mip levels. Description: {0}", desc.ToString());
         return true;
     }
     if (desc.IsDepthStencil())
@@ -414,7 +405,8 @@ bool GPUTexture::Init(const GPUTextureDescription& desc)
             LOG(Warning, "Cannot create texture. Texture cannot have per slice views. Description: {0}", desc.ToString());
             return true;
         }
-        if (desc.Width > device->Limits.MaximumTexture2DSize
+        if (desc.Width <= 0 || desc.Height <= 0 || desc.ArraySize <= 0
+            || desc.Width > device->Limits.MaximumTexture2DSize
             || desc.Height > device->Limits.MaximumTexture2DSize
             || desc.ArraySize > device->Limits.MaximumTexture2DArraySize)
         {
@@ -451,7 +443,8 @@ bool GPUTexture::Init(const GPUTextureDescription& desc)
             LOG(Warning, "Cannot create texture. Volume texture cannot have per slice map views if is not a render target. Description: {0}", desc.ToString());
             return true;
         }
-        if (desc.Width > device->Limits.MaximumTexture3DSize
+        if (desc.Width <= 0 || desc.Height <= 0 || desc.Depth <= 0
+            || desc.Width > device->Limits.MaximumTexture3DSize
             || desc.Height > device->Limits.MaximumTexture3DSize
             || desc.Depth > device->Limits.MaximumTexture3DSize)
         {
@@ -468,7 +461,8 @@ bool GPUTexture::Init(const GPUTextureDescription& desc)
             LOG(Warning, "Cannot create texture. Cube texture cannot have per slice views. Description: {0}", desc.ToString());
             return true;
         }
-        if (desc.Width > device->Limits.MaximumTextureCubeSize
+        if (desc.Width <= 0 || desc.ArraySize <= 0
+            || desc.Width > device->Limits.MaximumTextureCubeSize
             || desc.Height > device->Limits.MaximumTextureCubeSize
             || desc.ArraySize * 6 > device->Limits.MaximumTexture2DArraySize
             || desc.Width != desc.Height)
@@ -544,7 +538,7 @@ GPUTexture* GPUTexture::ToStagingUpload() const
 
 bool GPUTexture::Resize(int32 width, int32 height, int32 depth, PixelFormat format)
 {
-    // Validate texture is created
+    PROFILE_CPU();
     if (!IsAllocated())
     {
         LOG(Warning, "Cannot resize not created textures.");
@@ -608,6 +602,7 @@ GPUTask* GPUTexture::UploadMipMapAsync(const BytesContainer& data, int32 mipInde
 
 GPUTask* GPUTexture::UploadMipMapAsync(const BytesContainer& data, int32 mipIndex, int32 rowPitch, int32 slicePitch, bool copyData)
 {
+    PROFILE_CPU();
     ASSERT(IsAllocated());
     ASSERT(mipIndex < MipLevels() && data.IsValid());
     ASSERT(data.Length() >= slicePitch);
@@ -699,6 +694,7 @@ bool GPUTexture::DownloadData(TextureData& result)
     {
         MISSING_CODE("support volume texture data downloading.");
     }
+    PROFILE_CPU();
 
     // Use faster path for staging resources
     if (IsStaging())
@@ -780,6 +776,7 @@ Task* GPUTexture::DownloadDataAsync(TextureData& result)
     {
         MISSING_CODE("support volume texture data downloading.");
     }
+    PROFILE_CPU();
 
     // Use faster path for staging resources
     if (IsStaging())

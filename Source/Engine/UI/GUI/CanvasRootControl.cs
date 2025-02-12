@@ -1,6 +1,7 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
+using System.Collections.Generic;
 
 namespace FlaxEngine.GUI
 {
@@ -45,8 +46,9 @@ namespace FlaxEngine.GUI
         /// </summary>
         /// <param name="ray">The input ray to test (in world-space).</param>
         /// <param name="canvasLocation">Output canvas-space local position.</param>
+        /// <param name="precise">True if perform precise intersection test against the control content (eg. with hit mask or transparency threshold). Otherwise, only simple bounds-check will be performed.</param>
         /// <returns>True if canvas intersects with that point, otherwise false.</returns>
-        public bool Intersects3D(ref Ray ray, out Float2 canvasLocation)
+        public bool Intersects3D(ref Ray ray, out Float2 canvasLocation, bool precise = false)
         {
             // Inline bounds calculations (it will reuse world matrix)
             var bounds = new OrientedBoundingBox
@@ -67,7 +69,7 @@ namespace FlaxEngine.GUI
                 Vector3.Transform(ref hitPoint, ref world, out Vector3 localHitPoint);
 
                 canvasLocation = new Float2(localHitPoint);
-                return ContainsPoint(ref canvasLocation);
+                return ContainsPoint(ref canvasLocation, precise);
             }
 
             canvasLocation = Float2.Zero;
@@ -189,21 +191,25 @@ namespace FlaxEngine.GUI
         }
 
         /// <inheritdoc />
-        public override bool ContainsPoint(ref Float2 location)
+        public override bool ContainsPoint(ref Float2 location, bool precise)
         {
-            return base.ContainsPoint(ref location)
+            return base.ContainsPoint(ref location, precise)
                    && (_canvas.TestCanvasIntersection == null || _canvas.TestCanvasIntersection(ref location));
         }
 
         /// <inheritdoc />
         public override void Update(float deltaTime)
         {
+            base.Update(deltaTime);
+
             // Update navigation
             if (SkipEvents)
             {
                 _navigationHeldTimeUp = _navigationHeldTimeDown = _navigationHeldTimeLeft = _navigationHeldTimeRight = 0;
                 _navigationRateTimeUp = _navigationRateTimeDown = _navigationRateTimeLeft = _navigationRateTimeRight = 0;
+                return;
             }
+            if (ContainsFocus || IndexInParent == 0)
             {
                 UpdateNavigation(deltaTime, _canvas.NavigateUp.Name, NavDirection.Up, ref _navigationHeldTimeUp, ref _navigationRateTimeUp);
                 UpdateNavigation(deltaTime, _canvas.NavigateDown.Name, NavDirection.Down, ref _navigationHeldTimeDown, ref _navigationRateTimeDown);
@@ -211,8 +217,23 @@ namespace FlaxEngine.GUI
                 UpdateNavigation(deltaTime, _canvas.NavigateRight.Name, NavDirection.Right, ref _navigationHeldTimeRight, ref _navigationRateTimeRight);
                 UpdateNavigation(deltaTime, _canvas.NavigateSubmit.Name, ref _navigationHeldTimeSubmit, ref _navigationRateTimeSubmit, SubmitFocused);
             }
+        }
 
-            base.Update(deltaTime);
+        private void ConditionalNavigate(NavDirection direction)
+        {
+            // Only currently focused canvas updates its navigation
+            if (!ContainsFocus)
+            {
+                // Special case when no canvas nor game UI is focused so let the first canvas to start the navigation into the UI
+                if (IndexInParent == 0 && Parent is CanvasContainer canvasContainer && !canvasContainer.ContainsFocus && GameRoot.ContainsFocus)
+                {
+                    // Nothing is focused so go to the first control
+                    var focused = OnNavigate(direction, Float2.Zero, this, new List<Control>());
+                    focused?.NavigationFocus();
+                    return;
+                }
+            }
+            Navigate(direction);
         }
 
         private void UpdateNavigation(float deltaTime, string actionName, NavDirection direction, ref float heldTime, ref float rateTime)
@@ -221,7 +242,7 @@ namespace FlaxEngine.GUI
             {
                 if (heldTime <= Mathf.Epsilon)
                 {
-                    Navigate(direction);
+                    ConditionalNavigate(direction);
                 }
                 if (heldTime > _canvas.NavigationInputRepeatDelay)
                 {
@@ -229,7 +250,7 @@ namespace FlaxEngine.GUI
                 }
                 if (rateTime > _canvas.NavigationInputRepeatRate)
                 {
-                    Navigate(direction);
+                    ConditionalNavigate(direction);
                     rateTime = 0;
                 }
                 heldTime += deltaTime;

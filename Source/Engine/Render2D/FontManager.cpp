@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "FontManager.h"
 #include "FontTextureAtlas.h"
@@ -27,7 +27,6 @@ using namespace FontManagerImpl;
 class FontManagerService : public EngineService
 {
 public:
-
     FontManagerService()
         : EngineService(TEXT("Font Manager"), -700)
     {
@@ -155,6 +154,18 @@ bool FontManager::AddNewEntry(Font* font, Char c, FontCharacterEntry& entry)
 
     // Get the index to the glyph in the font face
     const FT_UInt glyphIndex = FT_Get_Char_Index(face, c);
+#if !BUILD_RELEASE
+    if (glyphIndex == 0 && c >= '!')
+    {
+        LOG(Warning, "Font `{}` doesn't contain character `\\u{:x}`, consider choosing another font.", String(face->family_name), c);
+    }
+#endif
+
+    // Init the character data
+    Platform::MemoryClear(&entry, sizeof(entry));
+    entry.Character = c;
+    entry.Font = font;
+    entry.IsValid = false;
 
     // Load the glyph
     const FT_Error error = FT_Load_Glyph(face, glyphIndex, glyphFlags);
@@ -190,8 +201,6 @@ bool FontManager::AddNewEntry(Font* font, Char c, FontCharacterEntry& entry)
     ASSERT(bitmap && bitmap->pixel_mode == FT_PIXEL_MODE_GRAY);
 
     // Fill the character data
-    Platform::MemoryClear(&entry, sizeof(entry));
-    entry.Character = c;
     entry.AdvanceX = Convert26Dot6ToRoundedPixel<int16>(glyph->advance.x);
     entry.OffsetY = glyph->bitmap_top;
     entry.OffsetX = glyph->bitmap_left;
@@ -243,17 +252,9 @@ bool FontManager::AddNewEntry(Font* font, Char c, FontCharacterEntry& entry)
     // Find atlas for the character texture
     int32 atlasIndex = 0;
     const FontTextureAtlasSlot* slot = nullptr;
-    for (; atlasIndex < Atlases.Count(); atlasIndex++)
-    {
-        // Add the character to the texture
+    for (; atlasIndex < Atlases.Count() && slot == nullptr; atlasIndex++)
         slot = Atlases[atlasIndex]->AddEntry(glyphWidth, glyphHeight, GlyphImageData);
-
-        // Check result, if not null char has been added
-        if (slot)
-        {
-            break;
-        }
-    }
+    atlasIndex--;
 
     // Check if there is no atlas for this character
     if (!slot)
@@ -262,6 +263,7 @@ bool FontManager::AddNewEntry(Font* font, Char c, FontCharacterEntry& entry)
         auto atlas = Content::CreateVirtualAsset<FontTextureAtlas>();
         atlas->Setup(PixelFormat::R8_UNorm, FontTextureAtlas::PaddingStyle::PadWithZero);
         Atlases.Add(atlas);
+        atlasIndex++;
 
         // Init atlas
         const int32 fontAtlasSize = 512; // TODO: make it a configuration variable
@@ -277,12 +279,11 @@ bool FontManager::AddNewEntry(Font* font, Char c, FontCharacterEntry& entry)
     }
 
     // Fill with atlas dependant data
-    const uint32 padding = Atlases[atlasIndex]->GetPaddingAmount();
-    entry.TextureIndex = atlasIndex;
-    entry.UV.X = static_cast<float>(slot->X + padding);
-    entry.UV.Y = static_cast<float>(slot->Y + padding);
-    entry.UVSize.X = static_cast<float>(slot->Width - 2 * padding);
-    entry.UVSize.Y = static_cast<float>(slot->Height - 2 * padding);
+    entry.TextureIndex = (byte)atlasIndex;
+    entry.UV.X = (float)slot->X;
+    entry.UV.Y = (float)slot->Y;
+    entry.UVSize.X = (float)slot->Width;
+    entry.UVSize.Y = (float)slot->Height;
     entry.Slot = slot;
 
     return false;
@@ -293,12 +294,7 @@ void FontManager::Invalidate(FontCharacterEntry& entry)
     if (entry.TextureIndex == MAX_uint8)
         return;
     auto atlas = Atlases[entry.TextureIndex];
-    const uint32 padding = atlas->GetPaddingAmount();
-    const uint32 slotX = static_cast<uint32>(entry.UV.X - padding);
-    const uint32 slotY = static_cast<uint32>(entry.UV.Y - padding);
-    const uint32 slotSizeX = static_cast<uint32>(entry.UVSize.X + 2 * padding);
-    const uint32 slotSizeY = static_cast<uint32>(entry.UVSize.Y + 2 * padding);
-    atlas->Invalidate(slotX, slotY, slotSizeX, slotSizeY);
+    atlas->Invalidate(entry.Slot);
 }
 
 void FontManager::Flush()

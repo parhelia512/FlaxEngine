@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -6,12 +6,11 @@
 #include "Engine/Core/Math/Vector2.h"
 #include "Engine/Core/Math/Vector3.h"
 #include "Engine/Core/Math/Vector4.h"
+#include "Engine/Core/Collections/Array.h"
 #include "Engine/Content/Asset.h"
 #include "Engine/Content/AssetReference.h"
 #include "Engine/Content/AssetsContainer.h"
 #include "Engine/Animations/Curve.h"
-
-#define VISJECT_GRAPH_NODE_MAX_ASSETS 14
 
 template<class BoxType>
 class VisjectGraphNode;
@@ -94,14 +93,14 @@ public:
     /// <summary>
     /// The asset references. Linked resources such as Animation assets are referenced in graph data as ID. We need to keep valid refs to them at runtime to keep data in memory.
     /// </summary>
-    AssetReference<Asset> Assets[VISJECT_GRAPH_NODE_MAX_ASSETS];
+    Array<AssetReference<Asset>> Assets;
 };
 
 /// <summary>
 /// Visject graph parameter.
 /// </summary>
 /// <seealso cref="GraphParameter" />
-API_CLASS() class VisjectGraphParameter : public GraphParameter
+API_CLASS() class FLAXENGINE_API VisjectGraphParameter : public GraphParameter
 {
     DECLARE_SCRIPTING_TYPE_WITH_CONSTRUCTOR_IMPL(VisjectGraphParameter, GraphParameter);
 public:
@@ -188,10 +187,9 @@ public:
 #undef SETUP_CURVE
             // Get Gameplay Global
             case 16:
-            {
+                n->Assets.Resize(1);
                 n->Assets[0] = ::LoadAsset((Guid)n->Values[0], Asset::TypeInitializer);
                 break;
-            }
             }
         }
 

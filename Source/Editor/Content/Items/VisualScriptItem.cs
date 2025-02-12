@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -100,13 +100,23 @@ namespace FlaxEditor.Content
         /// <inheritdoc />
         public object GetValue(object obj)
         {
+            if (!_type.Asset)
+                throw new TargetException("Missing Visual Script asset.");
             return _type.Asset.GetScriptInstanceParameterValue(_parameter.Name, (Object)obj);
         }
 
         /// <inheritdoc />
         public void SetValue(object obj, object value)
         {
+            if (!_type.Asset)
+                throw new TargetException("Missing Visual Script asset.");
             _type.Asset.SetScriptInstanceParameterValue(_parameter.Name, (Object)obj, value);
+        }
+
+        /// <inheritdoc />
+        public object Invoke(object obj, object[] parameters)
+        {
+            throw new NotSupportedException();
         }
     }
 
@@ -213,7 +223,8 @@ namespace FlaxEditor.Content
             if (_attributes == null)
             {
                 var data = _type.Asset.GetMethodMetaData(_index, Surface.SurfaceMeta.AttributeMetaTypeID);
-                _attributes = Surface.SurfaceMeta.GetAttributes(data);
+                var dataOld = _type.Asset.GetMethodMetaData(_index, Surface.SurfaceMeta.OldAttributeMetaTypeID);
+                _attributes = Surface.SurfaceMeta.GetAttributes(data, dataOld);
             }
             return _attributes;
         }
@@ -235,6 +246,14 @@ namespace FlaxEditor.Content
         {
             throw new NotSupportedException();
         }
+
+        /// <inheritdoc />
+        public object Invoke(object obj, object[] parameters)
+        {
+            if (!_type.Asset)
+                throw new TargetException("Missing Visual Script asset.");
+            return _type.Asset.InvokeMethod(_index, obj, parameters);
+        }
     }
 
     /// <summary>
@@ -248,6 +267,7 @@ namespace FlaxEditor.Content
         private ScriptMemberInfo[] _parameters;
         private ScriptMemberInfo[] _methods;
         private object[] _attributes;
+        private List<Action<ScriptType>> _disposing;
 
         /// <summary>
         /// Gets the Visual Script asset that contains this type.
@@ -290,13 +310,11 @@ namespace FlaxEditor.Content
                 _methods = Utils.GetEmptyArray<ScriptMemberInfo>();
 
             // Cache Visual Script attributes
-            var attributesData = _asset.GetMetaData(Surface.SurfaceMeta.AttributeMetaTypeID);
-            if (attributesData != null && attributesData.Length != 0)
             {
-                _attributes = Surface.SurfaceMeta.GetAttributes(attributesData);
+                var data = _asset.GetMetaData(Surface.SurfaceMeta.AttributeMetaTypeID);
+                var dataOld = _asset.GetMetaData(Surface.SurfaceMeta.OldAttributeMetaTypeID);
+                _attributes = Surface.SurfaceMeta.GetAttributes(data, dataOld);
             }
-            else
-                _attributes = Utils.GetEmptyArray<object>();
         }
 
         private void OnAssetReloading(Asset asset)
@@ -311,6 +329,13 @@ namespace FlaxEditor.Content
 
         internal void Dispose()
         {
+            if (_disposing != null)
+            {
+                foreach (var e in _disposing)
+                    e(new ScriptType(this));
+                _disposing.Clear();
+                _disposing = null;
+            }
             if (_parameters != null)
             {
                 OnAssetReloading(_asset);
@@ -510,6 +535,14 @@ namespace FlaxEditor.Content
                 return newArray;
             }
             return _methods;
+        }
+
+        /// <inheritdoc />
+        public void TrackLifetime(Action<ScriptType> disposing)
+        {
+            if (_disposing == null)
+                _disposing = new List<Action<ScriptType>>();
+            _disposing.Add(disposing);
         }
     }
 

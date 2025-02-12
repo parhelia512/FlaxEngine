@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Prefab.h"
 #include "Engine/Serialization/JsonTools.h"
@@ -8,9 +8,7 @@
 #include "Engine/Level/Prefabs/PrefabManager.h"
 #include "Engine/Level/Actor.h"
 #include "Engine/Threading/Threading.h"
-#if USE_EDITOR
 #include "Engine/Scripting/Scripting.h"
-#endif
 
 REGISTER_JSON_ASSET(Prefab, "FlaxEngine.Prefab", true);
 
@@ -150,6 +148,10 @@ Asset::LoadResult Prefab::loadAsset()
         ObjectsDataCache.Add(objectId, &objData);
         ObjectsCount++;
 
+        Guid parentID;
+        if (JsonTools::GetGuidIfValid(parentID, objData, "ParentID"))
+            ObjectsHierarchyCache[parentID].Add(objectId);
+
         Guid prefabId = JsonTools::GetGuid(objData, "PrefabID");
         if (prefabId.IsValid() && !NestedPrefabs.Contains(prefabId))
         {
@@ -163,10 +165,10 @@ Asset::LoadResult Prefab::loadAsset()
         }
     }
 
-#if USE_EDITOR
     // Register for scripts reload and unload (need to cleanup all user objects including scripts that may be attached to the default instance - it can be always restored)
-    Scripting::ScriptsReloading.Bind<Prefab, &Prefab::DeleteDefaultInstance>(this);
     Scripting::ScriptsUnload.Bind<Prefab, &Prefab::DeleteDefaultInstance>(this);
+#if USE_EDITOR
+    Scripting::ScriptsReloading.Bind<Prefab, &Prefab::DeleteDefaultInstance>(this);
 #endif
 
     return LoadResult::Ok;
@@ -174,10 +176,10 @@ Asset::LoadResult Prefab::loadAsset()
 
 void Prefab::unload(bool isReloading)
 {
-#if USE_EDITOR
     // Unlink
-    Scripting::ScriptsReloading.Unbind<Prefab, &Prefab::DeleteDefaultInstance>(this);
     Scripting::ScriptsUnload.Unbind<Prefab, &Prefab::DeleteDefaultInstance>(this);
+#if USE_EDITOR
+    Scripting::ScriptsReloading.Unbind<Prefab, &Prefab::DeleteDefaultInstance>(this);
 #endif
 
     // Base
@@ -188,6 +190,8 @@ void Prefab::unload(bool isReloading)
     NestedPrefabs.Resize(0);
     ObjectsDataCache.Clear();
     ObjectsDataCache.SetCapacity(0);
+    ObjectsHierarchyCache.Clear();
+    ObjectsHierarchyCache.SetCapacity(0);
     ObjectsCache.Clear();
     ObjectsCache.SetCapacity(0);
     if (_defaultInstance)

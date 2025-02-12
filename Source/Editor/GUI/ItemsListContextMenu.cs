@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -23,6 +23,9 @@ namespace FlaxEditor.GUI
         [HideInEditor]
         public class Item : Control
         {
+            private bool _isStartsWithMatch;
+            private bool _isFullMatch;
+
             /// <summary>
             /// The is mouse down flag.
             /// </summary>
@@ -44,6 +47,11 @@ namespace FlaxEditor.GUI
             public string Category;
 
             /// <summary>
+            /// A computed score for the context menu order
+            /// </summary>
+            public float SortScore;
+
+            /// <summary>
             /// Occurs when items gets clicked by the user.
             /// </summary>
             public event Action<Item> Clicked;
@@ -62,43 +70,68 @@ namespace FlaxEditor.GUI
             }
 
             /// <summary>
+            /// Updates the <see cref="SortScore"/>
+            /// </summary>
+            public void UpdateScore()
+            {
+                SortScore = 0;
+
+                if (!Visible)
+                    return;
+
+                if (_highlights is { Count: > 0 })
+                    SortScore += 1;
+                if (_isStartsWithMatch)
+                    SortScore += 2;
+                if (_isFullMatch)
+                    SortScore += 5;
+            }
+
+            /// <summary>
             /// Updates the filter.
             /// </summary>
             /// <param name="filterText">The filter text.</param>
             public void UpdateFilter(string filterText)
             {
+                _isStartsWithMatch = _isFullMatch = false;
+
                 if (string.IsNullOrWhiteSpace(filterText))
                 {
                     // Clear filter
                     _highlights?.Clear();
                     Visible = true;
+                    return;
                 }
-                else
+
+                if (QueryFilterHelper.Match(filterText, Name, out var ranges))
                 {
-                    if (QueryFilterHelper.Match(filterText, Name, out var ranges))
-                    {
-                        // Update highlights
-                        if (_highlights == null)
-                            _highlights = new List<Rectangle>(ranges.Length);
-                        else
-                            _highlights.Clear();
-                        var style = Style.Current;
-                        var font = style.FontSmall;
-                        for (int i = 0; i < ranges.Length; i++)
-                        {
-                            var start = font.GetCharPosition(Name, ranges[i].StartIndex);
-                            var end = font.GetCharPosition(Name, ranges[i].EndIndex);
-                            _highlights.Add(new Rectangle(start.X + 2, 0, end.X - start.X, Height));
-                        }
-                        Visible = true;
-                    }
+                    // Update highlights
+                    if (_highlights == null)
+                        _highlights = new List<Rectangle>(ranges.Length);
                     else
+                        _highlights.Clear();
+                    var style = Style.Current;
+                    var font = style.FontSmall;
+                    for (int i = 0; i < ranges.Length; i++)
                     {
-                        // Hide
-                        _highlights?.Clear();
-                        Visible = false;
+                        var start = font.GetCharPosition(Name, ranges[i].StartIndex);
+                        var end = font.GetCharPosition(Name, ranges[i].EndIndex);
+                        _highlights.Add(new Rectangle(start.X + 2, 0, end.X - start.X, Height));
+
+                        if (ranges[i].StartIndex <= 0)
+                        {
+                            _isStartsWithMatch = true;
+                            if (ranges[i].Length == Name.Length)
+                                _isFullMatch = true;
+                        }
                     }
+                    Visible = true;
+                    return;
                 }
+
+                // Hide
+                _highlights?.Clear();
+                Visible = false;
             }
 
             /// <summary>
@@ -121,6 +154,10 @@ namespace FlaxEditor.GUI
                 // Overlay
                 if (IsMouseOver || IsFocused)
                     Render2D.FillRectangle(new Rectangle(Float2.Zero, Size), style.BackgroundHighlighted);
+
+                // Indent for drop panel items is handled by drop panel margin
+                if (Parent is not DropPanel)
+                    textRect.Location += new Float2(Editor.Instance.Icons.ArrowRight12.Size.X + 2, 0);
 
                 // Draw all highlights
                 if (_highlights != null)
@@ -174,12 +211,19 @@ namespace FlaxEditor.GUI
             public override int Compare(Control other)
             {
                 if (other is Item otherItem)
-                    return string.Compare(Name, otherItem.Name, StringComparison.Ordinal);
+                {
+                    int order = -1 * SortScore.CompareTo(otherItem.SortScore);
+                    if (order == 0)
+                    {
+                        order = string.Compare(Name, otherItem.Name, StringComparison.Ordinal);
+                    }
+                    return order;
+                }
                 return base.Compare(other);
             }
         }
 
-        private readonly TextBox _searchBox;
+        private readonly SearchBox _searchBox;
         private readonly Panel _scrollPanel;
         private List<DropPanel> _categoryPanels;
         private bool _waitingForInput;
@@ -188,6 +232,11 @@ namespace FlaxEditor.GUI
         /// Event fired when any item in this popup menu gets clicked.
         /// </summary>
         public event Action<Item> ItemClicked;
+
+        /// <summary>
+        /// Event fired when search text in this popup menu gets changed.
+        /// </summary>
+        public event Action<string> TextChanged;
 
         /// <summary>
         /// The panel control where you should add your items.
@@ -211,6 +260,7 @@ namespace FlaxEditor.GUI
                 Width = Width - 3,
             };
             _searchBox.TextChanged += OnSearchFilterChanged;
+            _searchBox.ClearSearchButton.Clicked += () => PerformLayout();
 
             // Panel with scrollbar
             _scrollPanel = new Panel(ScrollBars.Vertical)
@@ -240,7 +290,10 @@ namespace FlaxEditor.GUI
             for (int i = 0; i < items.Count; i++)
             {
                 if (items[i] is Item item)
+                {
                     item.UpdateFilter(_searchBox.Text);
+                    item.UpdateScore();
+                }
             }
             if (_categoryPanels != null)
             {
@@ -253,16 +306,24 @@ namespace FlaxEditor.GUI
                         if (category.Children[j] is Item item2)
                         {
                             item2.UpdateFilter(_searchBox.Text);
+                            item2.UpdateScore();
                             anyVisible |= item2.Visible;
                         }
                     }
                     category.Visible = anyVisible;
+                    if (string.IsNullOrEmpty(_searchBox.Text))
+                        category.Close(false);
+                    else
+                        category.Open(false);
                 }
             }
+
+            SortItems();
 
             UnlockChildrenRecursive();
             PerformLayout(true);
             _searchBox.Focus();
+            TextChanged?.Invoke(_searchBox.Text);
         }
 
         /// <summary>
@@ -332,9 +393,14 @@ namespace FlaxEditor.GUI
                     var categoryPanel = new DropPanel
                     {
                         HeaderText = item.Category,
+                        ArrowImageOpened = new SpriteBrush(Editor.Instance.Icons.ArrowDown12),
+                        ArrowImageClosed = new SpriteBrush(Editor.Instance.Icons.ArrowRight12),
+                        EnableDropDownIcon = true,
+                        ItemsMargin = new Margin(28, 0, 2, 2),
+                        HeaderColor = Style.Current.Background,
                         Parent = parent,
                     };
-                    categoryPanel.Open(false);
+                    categoryPanel.Close(false);
                     _categoryPanels.Add(categoryPanel);
                     parent = categoryPanel;
                 }
@@ -376,6 +442,7 @@ namespace FlaxEditor.GUI
                             item2.UpdateFilter(null);
                     }
                     category.Visible = true;
+                    category.Close(false);
                 }
             }
 
@@ -439,6 +506,7 @@ namespace FlaxEditor.GUI
                 Hide();
                 return true;
             case KeyboardKeys.ArrowDown:
+            {
                 if (RootWindow.FocusedControl == null)
                 {
                     // Focus search box if nothing is focused
@@ -447,20 +515,19 @@ namespace FlaxEditor.GUI
                 }
 
                 //  Focus the first visible item or then next one
+                var items = GetVisibleItems();
+                var focusedIndex = items.IndexOf(focusedItem);
+                if (focusedIndex == -1)
+                    focusedIndex = -1;
+                if (focusedIndex + 1 < items.Count)
                 {
-                    var items = GetVisibleItems();
-                    var focusedIndex = items.IndexOf(focusedItem);
-                    if (focusedIndex == -1)
-                        focusedIndex = -1;
-                    if (focusedIndex + 1 < items.Count)
-                    {
-                        var item = items[focusedIndex + 1];
-                        item.Focus();
-                        _scrollPanel.ScrollViewTo(item);
-                        return true;
-                    }
+                    var item = items[focusedIndex + 1];
+                    item.Focus();
+                    _scrollPanel.ScrollViewTo(item);
+                    return true;
                 }
                 break;
+            }
             case KeyboardKeys.ArrowUp:
                 if (focusedItem != null)
                 {

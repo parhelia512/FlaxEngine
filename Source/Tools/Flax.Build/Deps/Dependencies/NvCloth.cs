@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System.Collections.Generic;
 using System.IO;
@@ -49,7 +49,7 @@ namespace Flax.Deps.Dependencies
                 }
             }
         }
-        
+
         /// <inheritdoc />
         public override void Build(BuildOptions options)
         {
@@ -61,10 +61,12 @@ namespace Flax.Deps.Dependencies
 
             foreach (var platform in options.Platforms)
             {
+                BuildStarted(platform);
                 switch (platform)
                 {
                 case TargetPlatform.Windows:
                     Build(options, platform, TargetArchitecture.x64);
+                    Build(options, platform, TargetArchitecture.ARM64);
                     break;
                 case TargetPlatform.XboxOne:
                 case TargetPlatform.XboxScarlett:
@@ -185,16 +187,16 @@ namespace Flax.Deps.Dependencies
 
             // Print the NvCloth version
             Log.Info($"Building {File.ReadAllLines(Path.Combine(root, "README.md"))[0].Trim()} to {platform} {architecture}");
-            
+
             // Generate project files
             SetupDirectory(buildFolder, false);
             Utilities.FileDelete(Path.Combine(cmakeFolder, "CMakeCache.txt"));
             cmakeArgs += $" -DPX_STATIC_LIBRARIES=1 -DPX_OUTPUT_DLL_DIR=\"{Path.Combine(buildFolder, "bin")}\" -DPX_OUTPUT_LIB_DIR=\"{Path.Combine(buildFolder, "lib")}\" -DPX_OUTPUT_EXE_DIR=\"{Path.Combine(buildFolder, "bin")}\"";
             RunCmake(cmakeFolder, platform, architecture, " -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF " + cmakeArgs, envVars);
-            
+
             // Run build
-            Utilities.Run("cmake", "--build . --config Release", null, cmakeFolder, Utilities.RunOptions.ThrowExceptionOnError, envVars);
-            
+            BuildCmake(cmakeFolder, envVars);
+
             // Deploy binaries
             var libs = new[]
             {

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 
@@ -8,6 +8,7 @@ namespace FlaxEngine.GUI
     /// Panel UI control.
     /// </summary>
     /// <seealso cref="FlaxEngine.GUI.ScrollableControl" />
+    [ActorToolbox("GUI")]
     public class Panel : ScrollableControl
     {
         private bool _layoutChanged;
@@ -16,6 +17,9 @@ namespace FlaxEngine.GUI
         private ScrollBars _scrollBars;
         private float _scrollBarsSize = ScrollBar.DefaultSize;
         private Margin _scrollMargin;
+        private Color _scrollbarTrackColor;
+        private Color _scrollbarThumbColor;
+        private Color _scrollbarThumbSelectedColor;
 
         /// <summary>
         /// The cached scroll area bounds. Used to scroll contents of the panel control. Cached during performing layout.
@@ -48,7 +52,7 @@ namespace FlaxEngine.GUI
         /// <summary>
         /// Gets or sets the scroll bars usage by this panel.
         /// </summary>
-        [EditorOrder(0), Tooltip("The scroll bars usage.")]
+        [EditorDisplay("Scrollbar Style"), EditorOrder(1500), Tooltip("The scroll bars usage.")]
         public ScrollBars ScrollBars
         {
             get => _scrollBars;
@@ -72,6 +76,12 @@ namespace FlaxEngine.GUI
                         //VScrollBar.X += VScrollBar.Width;
                         VScrollBar.ValueChanged += () => SetViewOffset(Orientation.Vertical, VScrollBar.Value);
                     }
+                    if (VScrollBar != null)
+                    {
+                        VScrollBar.TrackColor = _scrollbarTrackColor;
+                        VScrollBar.ThumbColor = _scrollbarThumbColor;
+                        VScrollBar.ThumbSelectedColor = _scrollbarThumbSelectedColor;
+                    }
                 }
                 else if (VScrollBar != null)
                 {
@@ -93,6 +103,12 @@ namespace FlaxEngine.GUI
                         //HScrollBar.Offsets += new Margin(0, 0, HScrollBar.Height * 0.5f, 0);
                         HScrollBar.ValueChanged += () => SetViewOffset(Orientation.Horizontal, HScrollBar.Value);
                     }
+                    if (HScrollBar != null)
+                    {
+                        HScrollBar.TrackColor = _scrollbarTrackColor;
+                        HScrollBar.ThumbColor = _scrollbarThumbColor;
+                        HScrollBar.ThumbSelectedColor = _scrollbarThumbSelectedColor;
+                    }
                 }
                 else if (HScrollBar != null)
                 {
@@ -107,7 +123,7 @@ namespace FlaxEngine.GUI
         /// <summary>
         /// Gets or sets the size of the scroll bars.
         /// </summary>
-        [EditorOrder(5), Tooltip("Scroll bars size.")]
+        [EditorDisplay("Scrollbar Style"), EditorOrder(1501), Tooltip("Scroll bars size.")]
         public float ScrollBarsSize
         {
             get => _scrollBarsSize;
@@ -123,7 +139,7 @@ namespace FlaxEngine.GUI
         /// <summary>
         /// Gets or sets a value indicating whether always show scrollbars. Otherwise show them only if scrolling is available.
         /// </summary>
-        [EditorOrder(10), Tooltip("Whether always show scrollbars. Otherwise show them only if scrolling is available.")]
+        [EditorDisplay("Scrollbar Style"), EditorOrder(1502), Tooltip("Whether always show scrollbars. Otherwise show them only if scrolling is available.")]
         public bool AlwaysShowScrollbars
         {
             get => _alwaysShowScrollbars;
@@ -132,6 +148,22 @@ namespace FlaxEngine.GUI
                 if (_alwaysShowScrollbars != value)
                 {
                     _alwaysShowScrollbars = value;
+                    switch (_scrollBars)
+                    {
+                    case ScrollBars.None:
+                        break;
+                    case ScrollBars.Horizontal:
+                        HScrollBar.Visible = value;
+                        break;
+                    case ScrollBars.Vertical:
+                        VScrollBar.Visible = value;
+                        break;
+                    case ScrollBars.Both:
+                        HScrollBar.Visible = value;
+                        VScrollBar.Visible = value;
+                        break;
+                    default: break;
+                    }
                     PerformLayout();
                 }
             }
@@ -140,7 +172,7 @@ namespace FlaxEngine.GUI
         /// <summary>
         /// Gets or sets the scroll margin applies to the child controls area. Can be used to expand the scroll area bounds by adding a margin.
         /// </summary>
-        [EditorOrder(20), Tooltip("Scroll margin applies to the child controls area. Can be used to expand the scroll area bounds by adding a margin.")]
+        [EditorDisplay("Scrollbar Style"), EditorOrder(1503), Tooltip("Scroll margin applies to the child controls area. Can be used to expand the scroll area bounds by adding a margin.")]
         public Margin ScrollMargin
         {
             get => _scrollMargin;
@@ -151,6 +183,57 @@ namespace FlaxEngine.GUI
                     _scrollMargin = value;
                     PerformLayout();
                 }
+            }
+        }
+
+        /// <summary>
+        /// The color of the scroll bar track.
+        /// </summary>
+        [EditorDisplay("Scrollbar Style"), EditorOrder(1600), ExpandGroups]
+        public Color ScrollbarTrackColor
+        {
+            get => _scrollbarTrackColor;
+            set
+            {
+                _scrollbarTrackColor = value;
+                if (VScrollBar != null)
+                    VScrollBar.TrackColor = _scrollbarTrackColor;
+                if (HScrollBar != null)
+                    HScrollBar.TrackColor = _scrollbarTrackColor;
+            }
+        }
+
+        /// <summary>
+        /// The color of the scroll bar thumb.
+        /// </summary>
+        [EditorDisplay("Scrollbar Style"), EditorOrder(1601)]
+        public Color ScrollbarThumbColor
+        {
+            get => _scrollbarThumbColor;
+            set
+            {
+                _scrollbarThumbColor = value;
+                if (VScrollBar != null)
+                    VScrollBar.ThumbColor = _scrollbarThumbColor;
+                if (HScrollBar != null)
+                    HScrollBar.ThumbColor = _scrollbarThumbColor;
+            }
+        }
+
+        /// <summary>
+        /// The color of the scroll bar thumb when selected.
+        /// </summary>
+        [EditorDisplay("Scrollbar Style"), EditorOrder(1602)]
+        public Color ScrollbarThumbSelectedColor
+        {
+            get => _scrollbarThumbSelectedColor;
+            set
+            {
+                _scrollbarThumbSelectedColor = value;
+                if (VScrollBar != null)
+                    VScrollBar.ThumbSelectedColor = _scrollbarThumbSelectedColor;
+                if (HScrollBar != null)
+                    HScrollBar.ThumbSelectedColor = _scrollbarThumbSelectedColor;
             }
         }
 
@@ -170,22 +253,31 @@ namespace FlaxEngine.GUI
         public Panel(ScrollBars scrollBars, bool autoFocus = false)
         {
             AutoFocus = autoFocus;
+            var style = Style.Current;
+            _scrollbarTrackColor = style.BackgroundHighlighted;
+            _scrollbarThumbColor = style.BackgroundNormal;
+            _scrollbarThumbSelectedColor = style.BackgroundSelected;
             ScrollBars = scrollBars;
         }
 
         /// <inheritdoc />
         protected override void SetViewOffset(ref Float2 value)
         {
+            // Update scroll bars but with locked layout
             bool wasLocked = _isLayoutLocked;
+            int layoutUpdateLock = _layoutUpdateLock;
             _isLayoutLocked = true;
-
+            _layoutUpdateLock = 999;
             if (HScrollBar != null)
-                HScrollBar.Value = -value.X;
+                HScrollBar.TargetValue = -value.X;
             if (VScrollBar != null)
-                VScrollBar.Value = -value.Y;
-
+                VScrollBar.TargetValue = -value.Y;
+            _layoutUpdateLock = layoutUpdateLock;
             _isLayoutLocked = wasLocked;
+
             base.SetViewOffset(ref value);
+
+            PerformLayout();
         }
 
         /// <summary>
@@ -275,10 +367,14 @@ namespace FlaxEngine.GUI
             if (base.OnMouseWheel(location, delta))
                 return true;
 
+            if (Input.GetKey(KeyboardKeys.Shift))
+            {
+                if (HScrollBar != null && HScrollBar.Enabled && HScrollBar.OnMouseWheel(HScrollBar.PointFromParent(ref location), delta))
+                    return true;
+            }
+
             // Roll back to scroll bars
             if (VScrollBar != null && VScrollBar.Enabled && VScrollBar.OnMouseWheel(VScrollBar.PointFromParent(ref location), delta))
-                return true;
-            if (HScrollBar != null && HScrollBar.Enabled && HScrollBar.OnMouseWheel(HScrollBar.PointFromParent(ref location), delta))
                 return true;
 
             // No event handled
@@ -353,6 +449,14 @@ namespace FlaxEngine.GUI
                 HScrollBar.Draw();
                 Render2D.PopTransform();
             }
+        }
+
+        /// <inheritdoc />
+        public override bool ContainsPoint(ref Float2 location, bool precise = false)
+        {
+            if (precise && BackgroundColor.A <= 0.0f) // Go through transparency
+                return false;
+            return base.ContainsPoint(ref location, precise);
         }
 
         /// <inheritdoc />
@@ -454,7 +558,12 @@ namespace FlaxEngine.GUI
 
                 if (vScrollEnabled)
                 {
-                    VScrollBar.SetScrollRange(scrollBounds.Top, Mathf.Max(Mathf.Max(0, scrollBounds.Top), scrollBounds.Height - height));
+                    float max;
+                    if (scrollBounds.Top < 0)
+                        max = Mathf.Max(scrollBounds.Bottom, scrollBounds.Top + scrollBounds.Height - height);
+                    else
+                        max = Mathf.Max(scrollBounds.Top, scrollBounds.Height - height);
+                    VScrollBar.SetScrollRange(scrollBounds.Top, max);
                 }
                 VScrollBar.Bounds = new Rectangle(Width - _scrollBarsSize, 0, _scrollBarsSize, Height);
             }
@@ -481,7 +590,12 @@ namespace FlaxEngine.GUI
 
                 if (hScrollEnabled)
                 {
-                    HScrollBar.SetScrollRange(scrollBounds.Left, Mathf.Max(Mathf.Max(0, scrollBounds.Left), scrollBounds.Width - width));
+                    float max;
+                    if (scrollBounds.Left < 0)
+                        max = Mathf.Max(scrollBounds.Right, scrollBounds.Left + scrollBounds.Width - width);
+                    else
+                        max = Mathf.Max(scrollBounds.Left, scrollBounds.Width - width);
+                    HScrollBar.SetScrollRange(scrollBounds.Left, max);
                 }
                 HScrollBar.Bounds = new Rectangle(0, Height - _scrollBarsSize, Width - (VScrollBar != null && VScrollBar.Visible ? VScrollBar.Width : 0), _scrollBarsSize);
             }
@@ -497,17 +611,29 @@ namespace FlaxEngine.GUI
             // Calculate scroll area bounds
             var totalMin = Float2.Zero;
             var totalMax = Float2.Zero;
+            var hasTotal = false;
             for (int i = 0; i < _children.Count; i++)
             {
                 var c = _children[i];
                 if (c.Visible && c.IsScrollable)
                 {
-                    var min = Float2.Zero;
-                    var max = c.Size;
-                    Matrix3x3.Transform2D(ref min, ref c._cachedTransform, out min);
-                    Matrix3x3.Transform2D(ref max, ref c._cachedTransform, out max);
-                    Float2.Min(ref min, ref totalMin, out totalMin);
-                    Float2.Max(ref max, ref totalMax, out totalMax);
+                    var upperLeft = Float2.Zero;
+                    var bottomRight = c.Size;
+                    Matrix3x3.Transform2D(ref upperLeft, ref c._cachedTransform, out upperLeft);
+                    Matrix3x3.Transform2D(ref bottomRight, ref c._cachedTransform, out bottomRight);
+                    Float2.Min(ref upperLeft, ref bottomRight, out var min);
+                    Float2.Max(ref upperLeft, ref bottomRight, out var max);
+                    if (hasTotal)
+                    {
+                        Float2.Min(ref min, ref totalMin, out totalMin);
+                        Float2.Max(ref max, ref totalMax, out totalMax);
+                    }
+                    else
+                    {
+                        totalMin = min;
+                        totalMax = max;
+                        hasTotal = true;
+                    }
                 }
             }
 
