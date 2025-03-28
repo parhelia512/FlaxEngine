@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -45,9 +45,16 @@ public:
     /// </summary>
     static void UnloadEngine();
 
+    /// <summary>
+    /// Creates the assembly load context for assemblies used by Scripting.
+    /// </summary>
+    static void CreateScriptingAssemblyLoadContext();
+
 #if USE_EDITOR
-    // Called by Scripting in a middle of hot-reload (after unloading modules but before loading them again).
-    static void ReloadScriptingAssemblyLoadContext();
+    /// <summary>
+    /// Called by Scripting in a middle of hot-reload (after unloading modules but before loading them again).
+    /// </summary>
+    static void UnloadScriptingAssemblyLoadContext();
 #endif
 
 public:
@@ -83,6 +90,7 @@ public:
     {
         static MArray* New(const MClass* elementKlass, int32 length);
         static MClass* GetClass(MClass* elementKlass);
+        static MClass* GetArrayClass(const MArray* obj);
         static int32 GetLength(const MArray* obj);
         static void* GetAddress(const MArray* obj);
         static MArray* Unbox(MObject* obj);

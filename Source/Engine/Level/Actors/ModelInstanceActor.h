@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -27,6 +27,8 @@ API_CLASS(Abstract) class FLAXENGINE_API ModelInstanceActor : public Actor
         API_FIELD() int32 LODIndex = 0;
         // Index of the mesh (within the LOD).
         API_FIELD() int32 MeshIndex = 0;
+
+        String ToString() const;
     };
 
 protected:
@@ -41,7 +43,7 @@ public:
     /// <summary>
     /// Gets the model entries collection. Each entry contains data how to render meshes using this entry (transformation, material, shadows casting, etc.).
     /// </summary>
-    API_PROPERTY(Attributes="Serialize, EditorOrder(1000), EditorDisplay(\"Entries\", EditorDisplayAttribute.InlineStyle), Collection(CanReorderItems=false, NotNullItems=true, ReadOnly=true, Spacing=10)")
+    API_PROPERTY(Attributes="Serialize, EditorOrder(1000), EditorDisplay(\"Entries\", EditorDisplayAttribute.InlineStyle), Collection(CanReorderItems=false, NotNullItems=true, CanResize=false, Spacing=10)")
     FORCE_INLINE const Array<ModelInstanceEntry>& GetEntries() const
     {
         return Entries;
@@ -142,6 +144,7 @@ protected:
 public:
     // [Actor]
     void OnLayerChanged() override;
+    void OnStaticFlagsChanged() override;
     void OnTransformChanged() override;
 
 protected:

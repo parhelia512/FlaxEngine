@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 
@@ -74,7 +74,7 @@ namespace FlaxEngine
         /// </summary>
         /// <param name="knowledge">The knowledge container to access.</param>
         /// <param name="value">The value to set.</param>
-        /// <returns>True if set value value, otherwise false.</returns>
+        /// <returns>True if set value, otherwise false.</returns>
         public bool Set(BehaviorKnowledge knowledge, object value)
         {
             return knowledge != null && knowledge.Set(Path, value);
@@ -146,7 +146,7 @@ namespace FlaxEngine
         public string Path;
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="BehaviorKnowledgeSelectorAny"/> structure.
+        /// Initializes a new instance of the <see cref="BehaviorKnowledgeSelector{T}"/> structure.
         /// </summary>
         /// <param name="path">The selector path.</param>
         public BehaviorKnowledgeSelector(string path)
@@ -155,7 +155,7 @@ namespace FlaxEngine
         }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="BehaviorKnowledgeSelectorAny"/> structure.
+        /// Initializes a new instance of the <see cref="BehaviorKnowledgeSelector{T}"/> structure.
         /// </summary>
         /// <param name="other">The other selector.</param>
         public BehaviorKnowledgeSelector(BehaviorKnowledgeSelectorAny other)

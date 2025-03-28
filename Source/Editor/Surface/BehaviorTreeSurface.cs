@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -24,6 +24,7 @@ namespace FlaxEditor.Surface
         public BehaviorTreeSurface(IVisjectSurfaceOwner owner, Action onSave, FlaxEditor.Undo undo)
         : base(owner, onSave, undo, CreateStyle())
         {
+            ScriptsBuilder.ScriptsReloadBegin += OnScriptsReloadBegin;
         }
 
         private static SurfaceStyle CreateStyle()
@@ -31,8 +32,13 @@ namespace FlaxEditor.Surface
             var editor = Editor.Instance;
             var style = SurfaceStyle.CreateStyleHandler(editor);
             style.DrawBox = DrawBox;
-            style.DrawConnection = DrawConnection;
+            style.DrawConnection = SurfaceStyle.DrawStraightConnection;
             return style;
+        }
+
+        private void OnScriptsReloadBegin()
+        {
+            _nodesCache.Clear();
         }
 
         private static void DrawBox(Box box)
@@ -47,11 +53,6 @@ namespace FlaxEditor.Surface
             if (box.IsMouseOver)
                 color *= 1.2f;
             Render2D.FillRectangle(rect, color);
-        }
-
-        private static void DrawConnection(Float2 start, Float2 end, Color color, float thickness)
-        {
-            Archetypes.Animation.StateMachineStateBase.DrawConnection(ref start, ref end, ref color);
         }
 
         private void OnActiveContextMenuVisibleChanged(Control activeCM)
@@ -191,6 +192,7 @@ namespace FlaxEditor.Surface
         {
             if (IsDisposing)
                 return;
+            ScriptsBuilder.ScriptsReloadBegin -= OnScriptsReloadBegin;
             _nodesCache.Wait();
 
             base.OnDestroy();

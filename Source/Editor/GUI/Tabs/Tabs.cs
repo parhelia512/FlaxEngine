@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEngine;
@@ -239,7 +239,7 @@ namespace FlaxEditor.GUI.Tabs
         /// </summary>
         public Tab SelectedTab
         {
-            get => _selectedIndex < 0 || Children.Count <= _selectedIndex ? null : Children[_selectedIndex + 1] as Tab;
+            get => _selectedIndex < 0 || Children.Count <= (_selectedIndex+1) ? null : Children[_selectedIndex + 1] as Tab;
             set => SelectedTabIndex = value != null ? Children.IndexOf(value) - 1 : -1;
         }
 
@@ -418,9 +418,19 @@ namespace FlaxEditor.GUI.Tabs
             {
                 // If scroll bar is visible it covers part of the tab header so include this in tab size to improve usability
                 if (_orientation == Orientation.Horizontal && TabsPanel.HScrollBar.Visible)
+                {
                     tabsSize.Y += TabsPanel.HScrollBar.Height;
+                    var style = Style.Current;
+                    TabsPanel.HScrollBar.TrackColor = style.Background;
+                    TabsPanel.HScrollBar.ThumbColor = style.ForegroundGrey;
+                }
                 else if (_orientation == Orientation.Vertical && TabsPanel.VScrollBar.Visible)
+                {
                     tabsSize.X += TabsPanel.VScrollBar.Width;
+                    var style = Style.Current;
+                    TabsPanel.VScrollBar.TrackColor = style.Background;
+                    TabsPanel.VScrollBar.ThumbColor = style.ForegroundGrey;
+                }
             }
 
             // Fit the tabs panel

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -91,7 +91,7 @@ public:
     Array<BlendShape> BlendShapes;
 
     /// <summary>
-    /// Global translation for this mesh to be at it's local origin.
+    /// Local translation for this mesh to be at it's local origin.
     /// </summary>
     Vector3 OriginTranslation = Vector3::Zero;
 
@@ -358,12 +358,19 @@ struct FLAXENGINE_API MaterialSlotEntry
 
     struct
     {
+        float Value = 0.5f;
+        int32 TextureIndex = -1;
+    } Roughness;
+
+    struct
+    {
         int32 TextureIndex = -1;
     } Normals;
 
     bool TwoSided = false;
 
     bool UsesProperties() const;
+    static float ShininessToRoughness(float shininess);
 };
 
 /// <summary>

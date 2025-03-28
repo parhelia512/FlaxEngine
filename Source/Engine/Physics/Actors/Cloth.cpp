@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Cloth.h"
 #include "Engine/Core/Log.h"
@@ -25,6 +25,11 @@ Cloth::Cloth(const SpawnParams& params)
 
     // Register for drawing to handle culling and distance LOD
     _drawCategory = SceneRendering::SceneDrawAsync;
+}
+
+void* Cloth::GetPhysicsCloth() const
+{
+    return _cloth;
 }
 
 ModelInstanceActor::MeshReference Cloth::GetMesh() const
@@ -415,9 +420,9 @@ void Cloth::OnDebugDrawSelected()
                 c1 = Color::Lerp(Color::Red, Color::White, _paint[i1]);
                 c2 = Color::Lerp(Color::Red, Color::White, _paint[i2]);
             }
-            DebugDraw::DrawLine(v0, v1, c0, c1, 0, false);
-            DebugDraw::DrawLine(v1, v2, c1, c2, 0, false);
-            DebugDraw::DrawLine(v2, v0, c2, c0, 0, false);
+            DebugDraw::DrawLine(v0, v1, c0, c1, 0, DebugDrawDepthTest);
+            DebugDraw::DrawLine(v1, v2, c1, c2, 0, DebugDrawDepthTest);
+            DebugDraw::DrawLine(v2, v0, c2, c0, 0, DebugDrawDepthTest);
         }
         PhysicsBackend::UnlockClothParticles(_cloth);
     }
@@ -636,6 +641,15 @@ void Cloth::CalculateInvMasses(Array<float>& invMasses)
     int32 indicesCount;
     if (mesh.Actor->GetMeshData(mesh, MeshBufferType::Index, indicesData, indicesCount))
         return;
+    if (_paint.Count() != verticesCount)
+    {
+        // Fix incorrect paint data
+        LOG(Warning, "Incorrect cloth '{}' paint size {} for mesh '{}' that has {} vertices", GetNamePath(), _paint.Count(), mesh.ToString(), verticesCount);
+        int32 countBefore = _paint.Count();
+        _paint.Resize(verticesCount);
+        for (int32 i = countBefore; i < verticesCount; i++)
+            _paint.Get()[i] = 0.0f;
+    }
     const int32 verticesStride = verticesData.Length() / verticesCount;
     const bool indices16bit = indicesData.Length() / indicesCount == sizeof(uint16);
     const int32 trianglesCount = indicesCount / 3;
@@ -687,12 +701,12 @@ void Cloth::CalculateInvMasses(Array<float>& invMasses)
     float massSum = 0;
     for (int32 i = 0; i < verticesCount; i++)
     {
-        float& mass = invMasses[i];
+        float& mass = invMasses.Get()[i];
 #if USE_CLOTH_SANITY_CHECKS
         // Sanity check
         ASSERT(!isnan(mass) && !isinf(mass) && mass >= 0.0f);
 #endif
-        const float maxDistance = _paint[i];
+        const float maxDistance = _paint.Get()[i];
         if (maxDistance < 0.01f)
         {
             // Fixed
@@ -712,7 +726,7 @@ void Cloth::CalculateInvMasses(Array<float>& invMasses)
         const float massScale = (float)(verticesCount - fixedCount) / massSum;
         for (int32 i = 0; i < verticesCount; i++)
         {
-            float& mass = invMasses[i];
+            float& mass = invMasses.Get()[i];
             if (mass > 0.0f)
             {
                 mass *= massScale;
@@ -767,6 +781,11 @@ bool Cloth::OnPreUpdate()
         int32 verticesCount;
         if (mesh.Actor->GetMeshData(mesh, MeshBufferType::Vertex0, verticesData, verticesCount))
             return false;
+        if (verticesCount != _paint.Count())
+        {
+            LOG(Warning, "Incorrect cloth '{}' paint size {} for mesh '{}' that has {} vertices", GetNamePath(), _paint.Count(), mesh.ToString(), verticesCount);
+            return false;
+        }
         PROFILE_CPU_NAMED("Skinned Pose");
         auto vbStride = (uint32)verticesData.Length() / verticesCount;
         ASSERT(vbStride == sizeof(VB0SkinnedElementType));
@@ -847,7 +866,8 @@ void Cloth::OnPostUpdate()
     if (_meshDeformation)
     {
         // Mark mesh as dirty
-        const Matrix invWorld = Matrix::Invert(_transform.GetWorld());
+        Matrix invWorld;
+        GetWorldToLocalMatrix(invWorld);
         BoundingBox localBounds;
         BoundingBox::Transform(_box, invWorld, localBounds);
         _meshDeformation->Dirty(_mesh.LODIndex, _mesh.MeshIndex, MeshBufferType::Vertex0, localBounds);

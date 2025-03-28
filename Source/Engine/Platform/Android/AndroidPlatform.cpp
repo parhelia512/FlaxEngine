@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if PLATFORM_ANDROID
 
@@ -707,11 +707,6 @@ bool AndroidPlatform::Is64BitPlatform()
 CPUInfo AndroidPlatform::GetCPUInfo()
 {
     return AndroidCpu;
-}
-
-int32 AndroidPlatform::GetCacheLineSize()
-{
-    return AndroidCpu.CacheLineSize;
 }
 
 MemoryStats AndroidPlatform::GetMemoryStats()

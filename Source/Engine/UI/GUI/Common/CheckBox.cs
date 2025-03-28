@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 
@@ -29,6 +29,7 @@ namespace FlaxEngine.GUI
     /// Check box control.
     /// </summary>
     /// <seealso cref="FlaxEngine.GUI.Control" />
+    [ActorToolbox("GUI")]
     public class CheckBox : Control
     {
         /// <summary>
@@ -255,6 +256,14 @@ namespace FlaxEngine.GUI
                 else
                     IntermediateImage?.Draw(_box, color);
             }
+        }
+
+        /// <inheritdoc />
+        public override bool ContainsPoint(ref Float2 location, bool precise = false)
+        {
+            if (precise) // Precise check for checkbox element
+                return _box.Contains(ref location);
+            return base.ContainsPoint(ref location, precise);
         }
 
         /// <inheritdoc />

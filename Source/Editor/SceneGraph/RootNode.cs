@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if USE_LARGE_WORLDS
 using Real = System.Double;
@@ -168,7 +168,14 @@ namespace FlaxEditor.SceneGraph
 
         /// <summary>
         /// Gets the list of selected scene graph nodes in the editor context.
+        /// [Deprecated in v1.10]
         /// </summary>
-        public abstract List<SceneGraphNode> Selection { get; }
+        [Obsolete("Use SceneContext.Selection instead.")]
+        public List<SceneGraphNode> Selection => SceneContext.Selection;
+
+        /// <summary>
+        /// Gets the list of selected scene graph nodes in the editor context.
+        /// </summary>
+        public abstract ISceneEditingContext SceneContext { get; }
     }
 }

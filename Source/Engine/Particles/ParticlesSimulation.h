@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -83,6 +83,11 @@ public:
     /// Custom per-node data (eg. position on spiral module for arc progress tracking)
     /// </summary>
     Array<byte> CustomData;
+
+    /// <summary>
+    /// The external amount of the particles to spawn.
+    /// </summary>
+    int32 CustomSpawnCount = 0;
 
     struct
     {

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.ComponentModel;
@@ -82,7 +82,7 @@ namespace FlaxEditor.Tools.Foliage
                 }
             }
 
-            [EditorOrder(20), EditorDisplay("Model"), Collection(ReadOnly = true), Tooltip("Model materials override collection. Can be used to change a specific material of the mesh to the custom one without editing the asset.")]
+            [EditorOrder(20), EditorDisplay("Model"), Collection(CanResize = true), Tooltip("Model materials override collection. Can be used to change a specific material of the mesh to the custom one without editing the asset.")]
             public MaterialBase[] Materials
             {
                 get
@@ -352,6 +352,7 @@ namespace FlaxEditor.Tools.Foliage
             {
                 AnchorPreset = AnchorPresets.HorizontalStretchTop,
                 Offsets = new Margin(4, 4, 4, 0),
+                Pivot = Float2.Zero,
                 IsScrollable = true,
                 Parent = splitPanel.Panel1
             };

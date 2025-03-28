@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if USE_LARGE_WORLDS
 using Real = System.Double;
@@ -34,7 +34,7 @@ namespace FlaxEngine.Utilities
             if (value == null)
                 return default;
             var type = value.GetType();
-            if (type != typeof(T))
+            if (type != typeof(T) && !typeof(T).IsAssignableFrom(type))
             {
                 if (typeof(T) == typeof(Vector2))
                 {

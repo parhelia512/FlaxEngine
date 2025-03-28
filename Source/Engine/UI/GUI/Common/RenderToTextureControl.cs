@@ -1,10 +1,11 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 namespace FlaxEngine.GUI
 {
     /// <summary>
     /// UI container control that can render children to texture and display pre-cached texture instead of drawing children every frame. It can be also used to render part of UI to texture and use it in material or shader.
     /// </summary>
+    [ActorToolbox("GUI")]
     public class RenderToTextureControl : ContainerControl
     {
         private bool _invalid, _redrawRegistered, _isDuringTextureDraw;
@@ -102,7 +103,19 @@ namespace FlaxEngine.GUI
             var context = GPUDevice.Instance.MainContext;
             _isDuringTextureDraw = true;
             context.Clear(_texture.View(), Color.Transparent);
-            Render2D.CallDrawing(this, context, _texture);
+            Render2D.Begin(context, _texture);
+            try
+            {
+                var scale = _textureSize / Size;
+                Matrix3x3.Scaling(scale.X, scale.Y, 1.0f, out var scaleMatrix);
+                Render2D.PushTransform(ref scaleMatrix);
+                Draw();
+                Render2D.PopTransform();
+            }
+            finally
+            {
+                Render2D.End();
+            }
             _isDuringTextureDraw = false;
             Profiler.EndEventGPU();
         }

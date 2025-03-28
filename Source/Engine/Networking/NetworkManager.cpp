@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "NetworkManager.h"
 #include "NetworkClient.h"
@@ -364,6 +364,8 @@ void NetworkManager::Stop()
 
     State = NetworkConnectionState::Disconnected;
     Mode = NetworkManagerMode::Offline;
+    LastUpdateTime = 0;
+
     StateChanged();
 }
 

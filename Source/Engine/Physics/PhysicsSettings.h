@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -56,6 +56,7 @@ API_ENUM() enum class PhysicsSolverType
 API_CLASS(sealed, Namespace="FlaxEditor.Content.Settings", NoConstructor) class FLAXENGINE_API PhysicsSettings : public SettingsBase
 {
     DECLARE_SCRIPTING_TYPE_MINIMAL(PhysicsSettings);
+
 public:
     /// <summary>
     /// The default gravity force value (in cm^2/s).
@@ -94,9 +95,15 @@ public:
     PhysicsBroadPhaseType BroadPhaseType = PhysicsBroadPhaseType::ParallelAutomaticBoxPruning;
 
     /// <summary>
+    /// Enables enhanced determinism in the simulation. This has a performance impact.
+    /// </summary>
+    API_FIELD(Attributes="EditorOrder(71), EditorDisplay(\"Simulation\")")
+    bool EnableEnhancedDeterminism = false;
+
+    /// <summary>
     /// The solver type to use in the simulation.
     /// </summary>
-    API_FIELD(Attributes="EditorOrder(72), EditorDisplay(\"Simulation\")")
+    API_FIELD(Attributes="EditorOrder(73), EditorDisplay(\"Simulation\")")
     PhysicsSolverType SolverType = PhysicsSolverType::ProjectedGaussSeidelIterativeSolver;
 
     /// <summary>

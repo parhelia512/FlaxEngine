@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -23,7 +23,7 @@ public:
     /// Gets the size of the box, measured in the object's local space.
     /// </summary>
     /// <remarks>The box size will be scaled by the actor's world scale. </remarks>
-    API_PROPERTY(Attributes="EditorOrder(100), DefaultValue(typeof(Float3), \"100,100,100\"), EditorDisplay(\"Collider\")")
+    API_PROPERTY(Attributes="EditorOrder(100), DefaultValue(typeof(Float3), \"100,100,100\"), EditorDisplay(\"Collider\"), ValueCategory(Utils.ValueCategory.Distance)")
     FORCE_INLINE Float3 GetSize() const
     {
         return _size;
@@ -46,7 +46,7 @@ public:
     /// <summary>
     /// Resizes the collider based on the bounds of it's parent to contain it whole (including any siblings).
     /// </summary>
-    API_FUNCTION() void AutoResize();
+    API_FUNCTION() void AutoResize(bool globalOrientation);
 
 public:
     // [Collider]

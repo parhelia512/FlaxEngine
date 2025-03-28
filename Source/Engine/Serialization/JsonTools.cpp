@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "JsonTools.h"
 #include "ISerializable.h"
@@ -41,7 +41,7 @@ void ChangeIds(rapidjson_flax::Value& obj, rapidjson_flax::Document& document, c
                 '0','0','0','0','0','0','0','0','0','0',
                 '0','0','0','0','0','0','0','0','0','0',
                 '0','0'
-                // @formatter:on
+            // @formatter:on
             };
             static const char* digits = "0123456789abcdef";
             uint32 n = value.A;
@@ -185,7 +185,7 @@ Ray JsonTools::GetRay(const Value& value)
 {
     return Ray(
         GetVector3(value, "Position", Vector3::Zero),
-        GetVector3(value, "Direction", Vector3::One)
+        GetVector3(value, "Direction", Vector3::Forward)
     );
 }
 

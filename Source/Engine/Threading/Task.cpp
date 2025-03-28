@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Task.h"
 #include "ThreadPoolTask.h"
@@ -7,16 +7,17 @@
 #include "Engine/Core/Types/DateTime.h"
 #include "Engine/Core/Collections/Array.h"
 #include "Engine/Core/Math/Math.h"
+#include "Engine/Profiler/ProfilerCPU.h"
 
 void Task::Start()
 {
-    if (_state != TaskState::Created)
+    if (GetState() != TaskState::Created)
         return;
 
     OnStart();
 
     // Change state
-    _state = TaskState::Queued;
+    SetState(TaskState::Queued);
 
     // Add task to the execution queue
     Enqueue();
@@ -37,6 +38,7 @@ void Task::Cancel()
 
 bool Task::Wait(double timeoutMilliseconds) const
 {
+    PROFILE_CPU();
     double startTime = Platform::GetTimeSeconds() * 0.001;
 
     // TODO: no active waiting! use a semaphore!
@@ -73,12 +75,9 @@ bool Task::Wait(double timeoutMilliseconds) const
 Task* Task::ContinueWith(Task* task)
 {
     ASSERT(task != nullptr && task != this);
-
     if (_continueWith)
         return _continueWith->ContinueWith(task);
-
     _continueWith = task;
-
     return task;
 }
 
@@ -111,7 +110,6 @@ Task* Task::ContinueWith(const Function<bool()>& action, Object* target)
 Task* Task::StartNew(Task* task)
 {
     ASSERT(task);
-
     task->Start();
     return task;
 }
@@ -138,11 +136,10 @@ Task* Task::StartNew(Function<bool()>::Signature& action, Object* target)
 
 void Task::Execute()
 {
-    // Begin
     if (IsCanceled())
         return;
     ASSERT(IsQueued());
-    _state = TaskState::Running;
+    SetState(TaskState::Running);
 
     // Perform an operation
     bool failed = Run();
@@ -150,7 +147,7 @@ void Task::Execute()
     // Process result
     if (IsCancelRequested())
     {
-        _state = TaskState::Canceled;
+        SetState(TaskState::Canceled);
     }
     else if (failed)
     {
@@ -168,10 +165,8 @@ void Task::OnStart()
 
 void Task::OnFinish()
 {
-    ASSERT(IsRunning());
-    ASSERT(!IsCancelRequested());
-
-    _state = TaskState::Finished;
+    ASSERT(IsRunning() && !IsCancelRequested());
+    SetState(TaskState::Finished);
 
     // Send event further
     if (_continueWith)
@@ -182,7 +177,7 @@ void Task::OnFinish()
 
 void Task::OnFail()
 {
-    _state = TaskState::Failed;
+    SetState(TaskState::Failed);
 
     // Send event further
     if (_continueWith)
@@ -210,8 +205,7 @@ void Task::OnCancel()
     const auto state = GetState();
     if (state != TaskState::Finished && state != TaskState::Failed)
     {
-        _state = TaskState::Canceled;
-
+        SetState(TaskState::Canceled);
         OnEnd();
     }
 }

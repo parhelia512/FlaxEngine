@@ -1,10 +1,10 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
 #include "Engine/Physics/Types.h"
 #include "Engine/Content/JsonAsset.h"
-#include "Engine/Content/AssetReference.h"
+#include "Engine/Content/JsonAssetReference.h"
 #include "Engine/Physics/Actors/PhysicsColliderActor.h"
 
 struct RayCastHit;
@@ -52,7 +52,7 @@ public:
     /// <summary>
     /// Gets the center of the collider, measured in the object's local space.
     /// </summary>
-    API_PROPERTY(Attributes="EditorOrder(10), DefaultValue(typeof(Vector3), \"0,0,0\"), EditorDisplay(\"Collider\")")
+    API_PROPERTY(Attributes="EditorOrder(10), DefaultValue(typeof(Vector3), \"0,0,0\"), EditorDisplay(\"Collider\"), ValueCategory(Utils.ValueCategory.Distance)")
     FORCE_INLINE Vector3 GetCenter() const
     {
         return _center;
@@ -66,7 +66,7 @@ public:
     /// <summary>
     /// Gets the contact offset. Colliders whose distance is less than the sum of their ContactOffset values will generate contacts. The contact offset must be positive. Contact offset allows the collision detection system to predictively enforce the contact constraint even when the objects are slightly separated.
     /// </summary>
-    API_PROPERTY(Attributes="EditorOrder(1), DefaultValue(2.0f), Limit(0, 100), EditorDisplay(\"Collider\")")
+    API_PROPERTY(Attributes="EditorOrder(1), DefaultValue(2.0f), Limit(0, 100), EditorDisplay(\"Collider\"), ValueCategory(Utils.ValueCategory.Distance)")
     FORCE_INLINE float GetContactOffset() const
     {
         return _contactOffset;
@@ -80,44 +80,10 @@ public:
     /// <summary>
     /// The physical material used to define the collider physical properties.
     /// </summary>
-    API_FIELD(Attributes="EditorOrder(2), DefaultValue(null), AssetReference(typeof(PhysicalMaterial), true), EditorDisplay(\"Collider\")")
-    AssetReference<JsonAsset> Material;
+    API_FIELD(Attributes="EditorOrder(2), DefaultValue(null), EditorDisplay(\"Collider\")")
+    JsonAssetReference<PhysicalMaterial> Material;
 
 public:
-    /// <summary>
-    /// Performs a raycast against this collider shape.
-    /// </summary>
-    /// <param name="origin">The origin of the ray.</param>
-    /// <param name="direction">The normalized direction of the ray.</param>
-    /// <param name="resultHitDistance">The raycast result hit position distance from the ray origin. Valid only if raycast hits anything.</param>
-    /// <param name="maxDistance">The maximum distance the ray should check for collisions.</param>
-    /// <returns>True if ray hits an object, otherwise false.</returns>
-    API_FUNCTION() bool RayCast(const Vector3& origin, const Vector3& direction, API_PARAM(Out) float& resultHitDistance, float maxDistance = MAX_float) const;
-
-    /// <summary>
-    /// Performs a raycast against this collider, returns results in a RaycastHit structure.
-    /// </summary>
-    /// <param name="origin">The origin of the ray.</param>
-    /// <param name="direction">The normalized direction of the ray.</param>
-    /// <param name="hitInfo">The result hit information. Valid only when method returns true.</param>
-    /// <param name="maxDistance">The maximum distance the ray should check for collisions.</param>
-    /// <returns>True if ray hits an object, otherwise false.</returns>
-    API_FUNCTION() bool RayCast(const Vector3& origin, const Vector3& direction, API_PARAM(Out) RayCastHit& hitInfo, float maxDistance = MAX_float) const;
-
-    /// <summary>
-    /// Gets a point on the collider that is closest to a given location. Can be used to find a hit location or position to apply explosion force or any other special effects.
-    /// </summary>
-    /// <param name="point">The position to find the closest point to it.</param>
-    /// <param name="result">The result point on the collider that is closest to the specified location.</param>
-    API_FUNCTION() void ClosestPoint(const Vector3& point, API_PARAM(Out) Vector3& result) const;
-
-    /// <summary>
-    /// Checks if a point is inside the collider.
-    /// </summary>
-    /// <param name="point">The point to check if is contained by the collider shape (in world-space).</param>
-    /// <returns>True if collider shape contains a given point, otherwise false.</returns>
-    API_FUNCTION() bool ContainsPoint(const Vector3& point) const;
-
     /// <summary>
     /// Computes minimum translational distance between two geometry objects.
     /// Translating the first collider by direction * distance will separate the colliders apart if the function returned true. Otherwise, direction and distance are not defined.
@@ -188,28 +154,31 @@ protected:
     /// </summary>
     void RemoveStaticActor();
 
-#if USE_EDITOR
-    virtual void DrawPhysicsDebug(RenderView& view);
-#endif
-
 private:
     void OnMaterialChanged();
 
 public:
     // [PhysicsColliderActor]
     RigidBody* GetAttachedRigidBody() const override;
+    bool RayCast(const Vector3& origin, const Vector3& direction, float& resultHitDistance, float maxDistance = MAX_float) const final;
+    bool RayCast(const Vector3& origin, const Vector3& direction, RayCastHit& hitInfo, float maxDistance = MAX_float) const final;
+    void ClosestPoint(const Vector3& point, Vector3& result) const final;
+    bool ContainsPoint(const Vector3& point) const final;
+
+#if USE_EDITOR
+    virtual void DrawPhysicsDebug(RenderView& view);
+#endif
 
 protected:
     // [PhysicsColliderActor]
-#if USE_EDITOR
     void OnEnable() override;
     void OnDisable() override;
-#endif
     void BeginPlay(SceneBeginData* data) override;
     void EndPlay() override;
     void OnActiveInTreeChanged() override;
     void OnParentChanged() override;
     void OnTransformChanged() override;
     void OnLayerChanged() override;
+    void OnStaticFlagsChanged() override;
     void OnPhysicsSceneChanged(PhysicsScene* previous) override;
 };

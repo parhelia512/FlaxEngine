@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Flax Engine. All rights reserved.
+// Copyright (c) 2012-2024 Flax Engine. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -52,7 +52,7 @@ namespace Flax.Build.Projects
         /// Generates the project.
         /// </summary>
         /// <param name="project">The project.</param>
-        public abstract void GenerateProject(Project project, string solutionPath);
+        public abstract void GenerateProject(Project project, string solutionPath, bool isMainProject);
 
         /// <summary>
         /// Generates the solution.

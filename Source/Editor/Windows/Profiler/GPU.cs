@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System.Collections.Generic;
 using FlaxEditor.GUI;
@@ -25,35 +25,49 @@ namespace FlaxEditor.Windows.Profiler
         : base("GPU")
         {
             // Layout
-            var panel = new Panel(ScrollBars.Vertical)
+            var mainPanel = new Panel(ScrollBars.None)
             {
                 AnchorPreset = AnchorPresets.StretchAll,
                 Offsets = Margin.Zero,
                 Parent = this,
             };
-            var layout = new VerticalPanel
-            {
-                AnchorPreset = AnchorPresets.HorizontalStretchTop,
-                Offsets = Margin.Zero,
-                IsScrollable = true,
-                Parent = panel,
-            };
-
+            
             // Chart
             _drawTimeCPU = new SingleChart
             {
                 Title = "Draw (CPU)",
+                AnchorPreset = AnchorPresets.HorizontalStretchTop,
+                Offsets = Margin.Zero,
+                Height = SingleChart.DefaultHeight,
                 FormatSample = v => (Mathf.RoundToInt(v * 10.0f) / 10.0f) + " ms",
-                Parent = layout,
+                Parent = mainPanel,
             };
             _drawTimeCPU.SelectedSampleChanged += OnSelectedSampleChanged;
+            
             _drawTimeGPU = new SingleChart
             {
                 Title = "Draw (GPU)",
+                AnchorPreset = AnchorPresets.HorizontalStretchTop,
+                Offsets = new Margin(0, 0, _drawTimeCPU.Height + 2, 0),
                 FormatSample = v => (Mathf.RoundToInt(v * 10.0f) / 10.0f) + " ms",
-                Parent = layout,
+                Parent = mainPanel,
             };
             _drawTimeGPU.SelectedSampleChanged += OnSelectedSampleChanged;
+            
+            var panel = new Panel(ScrollBars.Vertical)
+            {
+                AnchorPreset = AnchorPresets.StretchAll,
+                Offsets = new Margin(0, 0, _drawTimeCPU.Height + _drawTimeGPU.Height + 4, 0),
+                Parent = mainPanel,
+            };
+            var layout = new VerticalPanel
+            {
+                AnchorPreset = AnchorPresets.HorizontalStretchTop,
+                Offsets = Margin.Zero,
+                Pivot = Float2.Zero,
+                IsScrollable = true,
+                Parent = panel,
+            };
 
             // Timeline
             _timeline = new Timeline

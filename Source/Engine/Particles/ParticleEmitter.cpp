@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "ParticleEmitter.h"
 #include "ParticleSystem.h"
@@ -72,6 +72,8 @@ namespace
 
 Asset::LoadResult ParticleEmitter::load()
 {
+    ConcurrentSystemLocker::WriteScope systemScope(Particles::SystemLocker);
+
     // Load the graph
     const auto surfaceChunk = GetChunk(SHADER_FILE_CHUNK_VISJECT_SURFACE);
     if (!surfaceChunk)
@@ -219,7 +221,7 @@ Asset::LoadResult ParticleEmitter::load()
         ClearDependencies();
         for (const auto& node : Graph.Nodes)
         {
-            if (node.Type == GRAPH_NODE_MAKE_TYPE(14, 300))
+            if (node.Type == GRAPH_NODE_MAKE_TYPE(14, 300) && node.Assets.Count() > 0)
             {
                 const auto function = node.Assets[0].As<ParticleEmitterFunction>();
                 if (function)
@@ -287,6 +289,7 @@ Asset::LoadResult ParticleEmitter::load()
 
 void ParticleEmitter::unload(bool isReloading)
 {
+    ConcurrentSystemLocker::WriteScope systemScope(Particles::SystemLocker);
 #if COMPILE_WITH_SHADER_COMPILER
     UnregisterForShaderReloads(this);
 #endif
@@ -389,7 +392,7 @@ bool ParticleEmitter::SaveSurface(BytesContainer& data)
         LOG(Error, "Asset loading failed. Cannot save it.");
         return true;
     }
-
+    ConcurrentSystemLocker::WriteScope systemScope(Particles::SystemLocker);
     ScopeLock lock(Locker);
 
     // Release all chunks

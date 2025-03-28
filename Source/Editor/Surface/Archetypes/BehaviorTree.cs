@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -104,6 +104,16 @@ namespace FlaxEditor.Surface.Archetypes
                 }
             }
 
+            private void OnTypeDisposing(ScriptType type)
+            {
+                if (_type == type && !IsDisposing)
+                {
+                    // Turn into missing script
+                    _type = ScriptType.Null;
+                    Instance = null;
+                }
+            }
+
             public override void OnLoaded(SurfaceNodeActions action)
             {
                 base.OnLoaded(action);
@@ -113,6 +123,7 @@ namespace FlaxEditor.Surface.Archetypes
                 _type = TypeUtils.GetType(typeName);
                 if (_type != null)
                 {
+                    _type.TrackLifetime(OnTypeDisposing);
                     TooltipText = Editor.Instance.CodeDocs.GetTooltip(_type);
                     try
                     {

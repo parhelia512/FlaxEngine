@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.IO;
@@ -45,7 +45,16 @@ public class ModelPrefabEditor : GenericEditor
                     break;
                 _prefabId = prefabObject.PrefabID;
             }
+            else
+            {
+                // The model was removed earlier
+                _prefabId = Guid.Empty;
+                break;
+            }
         }
+
+        // Creates the import path UI
+        Utilities.Utils.CreateImportPathUI(layout, modelPrefab.ImportPath, false);
 
         var button = layout.Button("Reimport", "Reimports the source asset as prefab.");
         _reimportButton = button.Button;

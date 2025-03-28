@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if USE_LARGE_WORLDS
 using Real = System.Double;
@@ -183,6 +183,60 @@ namespace FlaxEditor.SceneGraph
         }
 
         /// <summary>
+        /// Get all nested actor nodes under this actor node.
+        /// </summary>
+        /// <returns>An array of ActorNodes</returns>
+        public ActorNode[] GetAllChildActorNodes()
+        {
+            var nodes = new List<ActorNode>();
+            GetAllChildActorNodes(nodes);
+            return nodes.ToArray();
+        }
+
+        /// <summary>
+        /// Get all nested actor nodes under this actor node.
+        /// </summary>
+        /// <param name="nodes">The output list to fill with results.</param>
+        public void GetAllChildActorNodes(List<ActorNode> nodes)
+        {
+            var children = ChildNodes;
+            if (children == null)
+                return;
+            for (int i = 0; i < children.Count; i++)
+            {
+                if (children[i] is ActorNode node)
+                {
+                    nodes.Add(node);
+                    node.GetAllChildActorNodes(nodes);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Whether an actor node can be selected with a selector inside editor viewport.
+        /// </summary>
+        public virtual bool CanSelectInViewport
+        {
+            get
+            {
+                var actor = Actor;
+                return actor &&
+                       actor.IsActiveInHierarchy &&
+                       (actor.HideFlags & HideFlags.DontSelect) == HideFlags.None &&
+                       actor.GetType() != typeof(EmptyActor);
+            }
+        }
+
+        /// <summary>
+        /// The selection points used to check if an actor node can be selected.
+        /// </summary>
+        /// <returns>The points to use if the actor can be selected.</returns>
+        public virtual Vector3[] GetActorSelectionPoints()
+        {
+            return Actor.EditorBox.GetCorners();
+        }
+
+        /// <summary>
         /// Gets a value indicating whether this actor can be used to create prefab from it (as a root).
         /// </summary>
         public virtual bool CanCreatePrefab => (_actor.HideFlags & HideFlags.DontSave) != HideFlags.DontSave;
@@ -215,10 +269,10 @@ namespace FlaxEditor.SceneGraph
         public override bool CanDuplicate => (_actor.HideFlags & HideFlags.HideInHierarchy) == 0;
 
         /// <inheritdoc />
-        public override bool IsActive => _actor.IsActive;
+        public override bool IsActive => _actor?.IsActive ?? false;
 
         /// <inheritdoc />
-        public override bool IsActiveInHierarchy => _actor.IsActiveInHierarchy;
+        public override bool IsActiveInHierarchy => _actor?.IsActiveInHierarchy ?? false;
 
         /// <inheritdoc />
         public override int OrderInParent
@@ -316,41 +370,7 @@ namespace FlaxEditor.SceneGraph
         {
             base.OnParentChanged();
 
-            // Update UI (special case if actor is spawned and added to existing scene tree)
-            var parentTreeNode = (parentNode as ActorNode)?.TreeNode;
-            if (parentTreeNode != null && !parentTreeNode.IsLayoutLocked)
-            {
-                parentTreeNode.IsLayoutLocked = true;
-                _treeNode.Parent = parentTreeNode;
-                _treeNode.IndexInParent = _actor.OrderInParent;
-                parentTreeNode.IsLayoutLocked = false;
-
-                // Skip UI update if node won't be in a view
-                if (parentTreeNode.IsCollapsed)
-                {
-                    TreeNode.UnlockChildrenRecursive();
-                }
-                else
-                {
-                    // Try to perform layout at the level where it makes it the most performant (the least computations)
-                    var tree = parentTreeNode.ParentTree;
-                    if (tree != null)
-                    {
-                        if (tree.Parent is FlaxEngine.GUI.Panel treeParent)
-                            treeParent.PerformLayout();
-                        else
-                            tree.PerformLayout();
-                    }
-                    else
-                    {
-                        parentTreeNode.PerformLayout();
-                    }
-                }
-            }
-            else
-            {
-                _treeNode.Parent = parentTreeNode;
-            }
+            _treeNode.OnParentChanged(_actor, parentNode as ActorNode);
         }
 
         /// <inheritdoc />

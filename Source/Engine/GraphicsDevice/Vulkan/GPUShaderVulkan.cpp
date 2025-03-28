@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if GRAPHICS_API_VULKAN
 
@@ -116,7 +116,7 @@ GPUShaderProgram* GPUShaderVulkan::CreateGPUShaderProgram(ShaderStage type, cons
     RenderToolsVulkan::ZeroStruct(createInfo, VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO);
     createInfo.codeSize = (size_t)spirv.Length();
     createInfo.pCode = (const uint32_t*)spirv.Get();
-#if VK_EXT_validation_cache
+#if VULKAN_USE_VALIDATION_CACHE
     VkShaderModuleValidationCacheCreateInfoEXT validationInfo;
     if (_device->ValidationCache != VK_NULL_HANDLE)
     {
@@ -194,6 +194,7 @@ GPUShaderProgram* GPUShaderVulkan::CreateGPUShaderProgram(ShaderStage type, cons
 
         break;
     }
+#if GPU_ALLOW_TESSELLATION_SHADERS
     case ShaderStage::Hull:
     {
         int32 controlPointsCount;
@@ -206,11 +207,21 @@ GPUShaderProgram* GPUShaderVulkan::CreateGPUShaderProgram(ShaderStage type, cons
         shader = New<GPUShaderProgramDSVulkan>(_device, initializer, header->DescriptorInfo, shaderModule);
         break;
     }
+#else
+    case ShaderStage::Hull:
+    {
+        int32 controlPointsCount;
+        stream.ReadInt32(&controlPointsCount);
+        break;
+    }
+#endif
+#if GPU_ALLOW_GEOMETRY_SHADERS
     case ShaderStage::Geometry:
     {
         shader = New<GPUShaderProgramGSVulkan>(_device, initializer, header->DescriptorInfo, shaderModule);
         break;
     }
+#endif
     case ShaderStage::Pixel:
     {
         shader = New<GPUShaderProgramPSVulkan>(_device, initializer, header->DescriptorInfo, shaderModule);

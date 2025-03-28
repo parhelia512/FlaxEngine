@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -98,7 +98,7 @@ API_CLASS(Namespace="FlaxEngine.Tools", Static) class FLAXENGINE_API ModelTool
 
     // Optional: inputModel or modelData
     // Optional: outputSDF or null, outputStream or null
-    static bool GenerateModelSDF(class Model* inputModel, class ModelData* modelData, float resolutionScale, int32 lodIndex, ModelBase::SDFData* outputSDF, class MemoryWriteStream* outputStream, const StringView& assetName, float backfacesThreshold = 0.6f);
+    static bool GenerateModelSDF(class Model* inputModel, class ModelData* modelData, float resolutionScale, int32 lodIndex, ModelBase::SDFData* outputSDF, class MemoryWriteStream* outputStream, const StringView& assetName, float backfacesThreshold = 0.6f, bool useGPU = true);
 
 #if USE_EDITOR
 
@@ -130,6 +130,19 @@ public:
     };
 
     /// <summary>
+    /// Declares the imported animation Root Motion modes.
+    /// </summary>
+    API_ENUM(Attributes="HideInEditor") enum class RootMotionMode
+    {
+        // Root Motion feature is disabled.
+        None = 0,
+        // Motion is extracted from the root node (or node specified by name).
+        ExtractNode = 1,
+        // Motion is extracted from the center of mass movement (estimated based on the skeleton pose animation).
+        ExtractCenterOfMass = 2,
+    };
+
+    /// <summary>
     /// Model import options.
     /// </summary>
     API_STRUCT(Attributes="HideInEditor") struct FLAXENGINE_API Options : public ISerializable
@@ -157,6 +170,9 @@ public:
         // Specifies the maximum angle (in degrees) that may be between two vertex tangents before their tangents and bi-tangents are smoothed. The default value is 45.
         API_FIELD(Attributes="EditorOrder(45), EditorDisplay(\"Geometry\"), VisibleIf(nameof(ShowSmoothingTangentsAngle)), Limit(0, 45, 0.1f)")
         float SmoothingTangentsAngle = 45.0f;
+        // If checked, the winding order of the vertices will be reversed.
+        API_FIELD(Attributes="EditorOrder(47), EditorDisplay(\"Geometry\"), VisibleIf(nameof(ShowGeometry))")
+        bool ReverseWindingOrder = false;
         // Enable/disable meshes geometry optimization.
         API_FIELD(Attributes="EditorOrder(50), EditorDisplay(\"Geometry\"), VisibleIf(nameof(ShowGeometry))")
         bool OptimizeMeshes = true;
@@ -183,7 +199,7 @@ public:
         String CollisionMeshesPrefix = TEXT("");
         // The type of collision that should be generated if the mesh has a collision prefix specified.
         API_FIELD(Attributes = "EditorOrder(105), EditorDisplay(\"Geometry\"), VisibleIf(nameof(ShowGeometry))")
-        CollisionDataType CollisionType = CollisionDataType::TriangleMesh;
+        CollisionDataType CollisionType = CollisionDataType::ConvexMesh;
 
     public: // Transform
 
@@ -228,9 +244,12 @@ public:
         bool ImportScaleTracks = false;
         // Enables root motion extraction support from this animation.
         API_FIELD(Attributes="EditorOrder(1060), EditorDisplay(\"Animation\"), VisibleIf(nameof(ShowAnimation))")
-        bool EnableRootMotion = false;
+        RootMotionMode RootMotion = RootMotionMode::None;
+        // Adjusts root motion applying flags. Can customize how root node animation can affect target actor movement (eg. apply both position and rotation changes).
+        API_FIELD(Attributes="EditorOrder(1060), EditorDisplay(\"Animation\"), VisibleIf(nameof(ShowRootMotion))")
+        AnimationRootMotionFlags RootMotionFlags = AnimationRootMotionFlags::RootPositionXZ;
         // The custom node name to be used as a root motion source. If not specified the actual root node will be used.
-        API_FIELD(Attributes="EditorOrder(1070), EditorDisplay(\"Animation\"), VisibleIf(nameof(ShowAnimation))")
+        API_FIELD(Attributes="EditorOrder(1070), EditorDisplay(\"Animation\"), VisibleIf(nameof(ShowRootMotion))")
         String RootNodeName = TEXT("");
 
     public: // Level Of Detail
@@ -239,10 +258,10 @@ public:
         API_FIELD(Attributes="EditorOrder(1100), EditorDisplay(\"Level Of Detail\", \"Generate LODs\"), VisibleIf(nameof(ShowGeometry))")
         bool GenerateLODs = false;
         // The index of the LOD from the source model data to use as a reference for following LODs generation.
-        API_FIELD(Attributes="EditorOrder(1110), EditorDisplay(\"Level Of Detail\", \"Base LOD\"), VisibleIf(nameof(ShowGeometry)), Limit(0, 5)")
+        API_FIELD(Attributes="EditorOrder(1110), EditorDisplay(\"Level Of Detail\", \"Base LOD\"), VisibleIf(nameof(ShowGeometry)), Limit(0, 5, 0.065f)")
         int32 BaseLOD = 0;
         // The amount of LODs to include in the model (all remaining ones starting from Base LOD will be generated).
-        API_FIELD(Attributes="EditorOrder(1120), EditorDisplay(\"Level Of Detail\", \"LOD Count\"), VisibleIf(nameof(ShowGeometry)), Limit(1, 6)")
+        API_FIELD(Attributes="EditorOrder(1120), EditorDisplay(\"Level Of Detail\", \"LOD Count\"), VisibleIf(nameof(ShowGeometry)), Limit(1, 6, 0.065f)")
         int32 LODCount = 4;
         // The target amount of triangles for the generated LOD (based on the higher LOD). Normalized to range 0-1. For instance 0.4 cuts the triangle count to 40%.
         API_FIELD(Attributes="EditorOrder(1130), EditorDisplay(\"Level Of Detail\"), VisibleIf(nameof(ShowGeometry)), Limit(0, 1, 0.001f)")
@@ -251,7 +270,7 @@ public:
         API_FIELD(Attributes="EditorOrder(1140), EditorDisplay(\"Level Of Detail\"), VisibleIf(nameof(ShowGeometry))")
         bool SloppyOptimization = false;
         // Only used if Sloppy is false. Target error is an approximate measure of the deviation from the original mesh using distance normalized to [0..1] range (e.g. 1e-2f means that simplifier will try to maintain the error to be below 1% of the mesh extents).
-        API_FIELD(Attributes="EditorOrder(1150), EditorDisplay(\"Level Of Detail\"), VisibleIf(nameof(SloppyOptimization), true), Limit(0.01f, 1, 0.001f)")
+        API_FIELD(Attributes="EditorOrder(1150), EditorDisplay(\"Level Of Detail\"), VisibleIf(nameof(SloppyOptimization), true), VisibleIf(nameof(ShowGeometry)), Limit(0.01f, 1, 0.001f)")
         float LODTargetError = 0.05f;
 
     public: // Materials
@@ -290,7 +309,7 @@ public:
         API_FIELD(Attributes="EditorOrder(2000), EditorDisplay(\"Splitting\"), VisibleIf(nameof(ShowSplitting))")
         bool SplitObjects = false;
         // The zero-based index for the mesh/animation clip to import. If the source file has more than one mesh/animation it can be used to pick a desired object. Default -1 imports all objects.
-        API_FIELD(Attributes="EditorOrder(2010), EditorDisplay(\"Splitting\"), VisibleIf(nameof(ShowSplitting))")
+        API_FIELD(Attributes="EditorOrder(2010), EditorDisplay(\"Splitting\"), VisibleIf(nameof(ShowSplitting)), Limit(int.MinValue, int.MaxValue, 0.065f)")
         int32 ObjectIndex = -1;
 
     public: // Other
@@ -370,13 +389,13 @@ public:
 private:
     static void CalculateBoneOffsetMatrix(const Array<SkeletonNode>& nodes, Matrix& offsetMatrix, int32 nodeIndex);
 #if USE_ASSIMP
-    static bool ImportDataAssimp(const char* path, ModelData& data, Options& options, String& errorMsg);
+    static bool ImportDataAssimp(const String& path, ModelData& data, Options& options, String& errorMsg);
 #endif
 #if USE_AUTODESK_FBX_SDK
-	static bool ImportDataAutodeskFbxSdk(const char* path, ModelData& data, Options& options, String& errorMsg);
+	static bool ImportDataAutodeskFbxSdk(const String& path, ModelData& data, Options& options, String& errorMsg);
 #endif
 #if USE_OPEN_FBX
-    static bool ImportDataOpenFBX(const char* path, ModelData& data, Options& options, String& errorMsg);
+    static bool ImportDataOpenFBX(const String& path, ModelData& data, Options& options, String& errorMsg);
 #endif
 #endif
 };

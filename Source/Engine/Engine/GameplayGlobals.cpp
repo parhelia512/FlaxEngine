@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "GameplayGlobals.h"
 #include "Engine/Core/Log.h"
@@ -124,7 +124,7 @@ void GameplayGlobals::SetDefaultValues(const Dictionary<String, Variant>& values
     }
 }
 
-Variant GameplayGlobals::GetValue(const StringView& name) const
+const Variant& GameplayGlobals::GetValue(const StringView& name) const
 {
     ScopeLock lock(Locker);
     auto e = Variables.TryGet(name);
@@ -221,9 +221,7 @@ Asset::LoadResult GameplayGlobals::load()
     // Get data
     const auto chunk = GetChunk(0);
     if (!chunk || !chunk->IsLoaded())
-    {
         return LoadResult::MissingDataChunk;
-    }
     MemoryReadStream stream(chunk->Get(), chunk->Size());
 
     // Load all variables
@@ -234,14 +232,15 @@ Asset::LoadResult GameplayGlobals::load()
     for (int32 i = 0; i < count; i++)
     {
         stream.ReadString(&name, 71);
-        if (name.IsEmpty())
-        {
-            LOG(Warning, "Empty variable name");
-            return LoadResult::InvalidData;
-        }
         auto& e = Variables[name];
         stream.ReadVariant(&e.DefaultValue);
         e.Value = e.DefaultValue;
+    }
+    if (stream.HasError())
+    {
+        // Failed to load data
+        Variables.Clear();
+        return LoadResult::InvalidData;
     }
 
     return LoadResult::Ok;

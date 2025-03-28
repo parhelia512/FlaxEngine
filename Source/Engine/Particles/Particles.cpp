@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Particles.h"
 #include "ParticleEffect.h"
@@ -111,6 +111,7 @@ namespace ParticleManagerImpl
 using namespace ParticleManagerImpl;
 
 TaskGraphSystem* Particles::System = nullptr;
+ConcurrentSystemLocker Particles::SystemLocker;
 bool Particles::EnableParticleBufferPooling = true;
 float Particles::ParticleBufferRecycleTimeout = 10.0f;
 
@@ -139,6 +140,8 @@ class ParticlesSystem : public TaskGraphSystem
 {
 public:
     float DeltaTime, UnscaledDeltaTime, Time, UnscaledTime;
+    bool Active;
+
     void Job(int32 index);
     void Execute(TaskGraph* graph) override;
     void PostExecute(TaskGraph* graph) override;
@@ -161,7 +164,7 @@ void Particles::OnEffectDestroy(ParticleEffect* effect)
 
 typedef Array<int32, FixedAllocation<PARTICLE_EMITTER_MAX_MODULES>> RenderModulesIndices;
 
-void DrawEmitterCPU(RenderContext& renderContext, ParticleBuffer* buffer, DrawCall& drawCall, DrawPass drawModes, StaticFlags staticFlags, ParticleEmitterInstance& emitterData, const RenderModulesIndices& renderModulesIndices, int16 sortOrder)
+void DrawEmitterCPU(RenderContext& renderContext, ParticleBuffer* buffer, DrawCall& drawCall, DrawPass drawModes, StaticFlags staticFlags, ParticleEmitterInstance& emitterData, const RenderModulesIndices& renderModulesIndices, int8 sortOrder)
 {
     // Skip if CPU buffer is empty
     if (buffer->CPU.Count == 0)
@@ -289,9 +292,9 @@ void DrawEmitterCPU(RenderContext& renderContext, ParticleBuffer* buffer, DrawCa
     // Check if need to setup ribbon modules
     int32 ribbonModuleIndex = 0;
     int32 ribbonModulesDrawIndicesPos = 0;
-    int32 ribbonModulesDrawIndicesStart[PARTICLE_EMITTER_MAX_RIBBONS];
-    int32 ribbonModulesDrawIndicesCount[PARTICLE_EMITTER_MAX_RIBBONS];
-    int32 ribbonModulesSegmentCount[PARTICLE_EMITTER_MAX_RIBBONS];
+    int32 ribbonModulesDrawIndicesStart[PARTICLE_EMITTER_MAX_RIBBONS] = {};
+    int32 ribbonModulesDrawIndicesCount[PARTICLE_EMITTER_MAX_RIBBONS] = {};
+    int32 ribbonModulesSegmentCount[PARTICLE_EMITTER_MAX_RIBBONS] = {};
     if (emitter->Graph.RibbonRenderingModules.HasItems())
     {
         // Prepare ribbon data
@@ -569,7 +572,7 @@ void DrawEmitterCPU(RenderContext& renderContext, ParticleBuffer* buffer, DrawCa
 
 #if COMPILE_WITH_GPU_PARTICLES
 
-PACK_STRUCT(struct GPUParticlesSortingData {
+GPU_CB_STRUCT(GPUParticlesSortingData {
     Float3 ViewPosition;
     uint32 ParticleCounterOffset;
     uint32 ParticleStride;
@@ -598,7 +601,7 @@ void CleanupGPUParticlesSorting()
     GPUParticlesSorting = nullptr;
 }
 
-void DrawEmitterGPU(RenderContext& renderContext, ParticleBuffer* buffer, DrawCall& drawCall, DrawPass drawModes, StaticFlags staticFlags, ParticleEmitterInstance& emitterData, const RenderModulesIndices& renderModulesIndices, int16 sortOrder)
+void DrawEmitterGPU(RenderContext& renderContext, ParticleBuffer* buffer, DrawCall& drawCall, DrawPass drawModes, StaticFlags staticFlags, ParticleEmitterInstance& emitterData, const RenderModulesIndices& renderModulesIndices, int8 sortOrder)
 {
     const auto context = GPUDevice::Instance->GetMainContext();
     auto emitter = buffer->Emitter;
@@ -921,7 +924,7 @@ void Particles::DrawParticles(RenderContext& renderContext, ParticleEffect* effe
     worldDeterminantSigns[0] = Math::FloatSelect(worlds[0].RotDeterminant(), 1, -1);
     worldDeterminantSigns[1] = Math::FloatSelect(worlds[1].RotDeterminant(), 1, -1);
     const StaticFlags staticFlags = effect->GetStaticFlags();
-    const int16 sortOrder = effect->SortOrder;
+    const int8 sortOrder = effect->SortOrder;
 
     // Draw lights
     for (int32 emitterIndex = 0; emitterIndex < effect->Instance.Emitters.Count(); emitterIndex++)
@@ -931,6 +934,8 @@ void Particles::DrawParticles(RenderContext& renderContext, ParticleEffect* effe
         if (!buffer || (buffer->Mode == ParticlesSimulationMode::CPU && buffer->CPU.Count == 0))
             continue;
         auto emitter = buffer->Emitter;
+        if (!emitter || !emitter->IsLoaded())
+            continue;
 
         buffer->Emitter->GraphExecutorCPU.Draw(buffer->Emitter, effect, emitterData, renderContext, worlds[(int32)emitter->SimulationSpace]);
     }
@@ -939,7 +944,7 @@ void Particles::DrawParticles(RenderContext& renderContext, ParticleEffect* effe
     DrawCall drawCall;
     drawCall.PerInstanceRandom = effect->GetPerInstanceRandom();
     drawCall.ObjectPosition = effect->GetSphere().Center - view.Origin;
-    drawCall.ObjectRadius = effect->GetSphere().Radius;
+    drawCall.ObjectRadius = (float)effect->GetSphere().Radius;
 
     // Draw all emitters
     for (int32 emitterIndex = 0; emitterIndex < effect->Instance.Emitters.Count(); emitterIndex++)
@@ -949,6 +954,8 @@ void Particles::DrawParticles(RenderContext& renderContext, ParticleEffect* effe
         if (!buffer)
             continue;
         auto emitter = buffer->Emitter;
+        if (!emitter || !emitter->IsLoaded())
+            continue;
 
         drawCall.World = worlds[(int32)emitter->SimulationSpace];
         drawCall.WorldDeterminantSign = worldDeterminantSigns[(int32)emitter->SimulationSpace];
@@ -1049,7 +1056,6 @@ void UpdateGPU(RenderTask* task, GPUContext* context)
     ScopeLock lock(GpuUpdateListLocker);
     if (GpuUpdateList.IsEmpty())
         return;
-
     PROFILE_GPU("GPU Particles");
 
     for (ParticleEffect* effect : GpuUpdateList)
@@ -1089,6 +1095,7 @@ void UpdateGPU(RenderTask* task, GPUContext* context)
 
 ParticleBuffer* Particles::AcquireParticleBuffer(ParticleEmitter* emitter)
 {
+    PROFILE_CPU();
     ParticleBuffer* result = nullptr;
     ASSERT(emitter && emitter->IsLoaded());
 
@@ -1098,7 +1105,7 @@ ParticleBuffer* Particles::AcquireParticleBuffer(ParticleEmitter* emitter)
         const auto entries = Pool.TryGet(emitter);
         if (entries)
         {
-            while (entries->HasItems())
+            while (entries->HasItems() && !result)
             {
                 // Reuse buffer
                 result = entries->Last().Buffer;
@@ -1109,11 +1116,6 @@ ParticleBuffer* Particles::AcquireParticleBuffer(ParticleEmitter* emitter)
                 {
                     Delete(result);
                     result = nullptr;
-                    if (entries->IsEmpty())
-                    {
-                        Pool.Remove(emitter);
-                        break;
-                    }
                 }
             }
         }
@@ -1142,6 +1144,7 @@ ParticleBuffer* Particles::AcquireParticleBuffer(ParticleEmitter* emitter)
 
 void Particles::RecycleParticleBuffer(ParticleBuffer* buffer)
 {
+    PROFILE_CPU();
     if (buffer->Emitter->EnablePooling && EnableParticleBufferPooling)
     {
         // Return to pool
@@ -1162,6 +1165,7 @@ void Particles::RecycleParticleBuffer(ParticleBuffer* buffer)
 
 void Particles::OnEmitterUnload(ParticleEmitter* emitter)
 {
+    PROFILE_CPU();
     PoolLocker.Lock();
     const auto entries = Pool.TryGet(emitter);
     if (entries)
@@ -1389,6 +1393,10 @@ void ParticlesSystem::Execute(TaskGraph* graph)
 {
     if (UpdateList.Count() == 0)
         return;
+    Active = true;
+
+    // Ensure no particle assets can be reloaded/modified during async update
+    Particles::SystemLocker.Begin(false);
 
     // Setup data for async update
     const auto& tickData = Time::Update;
@@ -1405,8 +1413,13 @@ void ParticlesSystem::Execute(TaskGraph* graph)
 
 void ParticlesSystem::PostExecute(TaskGraph* graph)
 {
+    if (!Active)
+        return;
     PROFILE_CPU_NAMED("Particles.PostExecute");
 
+    // Cleanup
+    Particles::SystemLocker.End(false);
+    Active = false;
     UpdateList.Clear();
 
 #if COMPILE_WITH_GPU_PARTICLES

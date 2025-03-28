@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Serialization.h"
 #include "Engine/Core/Log.h"
@@ -23,6 +23,7 @@
 #include "Engine/Scripting/ManagedCLR/MClass.h"
 #include "Engine/Scripting/ScriptingObjectReference.h"
 #include "Engine/Content/Asset.h"
+#include "Engine/Level/SceneObject.h"
 #include "Engine/Utilities/Encryption.h"
 
 void ISerializable::DeserializeIfExists(DeserializeStream& stream, const char* memberName, ISerializeModifier* modifier)
@@ -479,7 +480,7 @@ void Serialization::Deserialize(ISerializable::DeserializeStream& stream, Versio
                 const auto mBuild = SERIALIZE_FIND_MEMBER(stream, "Build");
                 if (mBuild != stream.MemberEnd())
                 {
-                    const auto mRevision = SERIALIZE_FIND_MEMBER(stream, "mRevision");
+                    const auto mRevision = SERIALIZE_FIND_MEMBER(stream, "Revision");
                     if (mRevision != stream.MemberEnd())
                         v = Version(mMajor->value.GetInt(), mMinor->value.GetInt(), mBuild->value.GetInt(), mRevision->value.GetInt());
                     else
@@ -747,9 +748,21 @@ bool Serialization::ShouldSerialize(const Transform& v, const void* otherObj)
 
 void Serialization::Deserialize(ISerializable::DeserializeStream& stream, Transform& v, ISerializeModifier* modifier)
 {
-    DESERIALIZE_HELPER(stream, "Translation", v.Translation, Vector3::Zero);
-    DESERIALIZE_HELPER(stream, "Scale", v.Scale, Vector3::One);
-    DESERIALIZE_HELPER(stream, "Orientation", v.Orientation, Quaternion::Identity);
+    {
+        const auto m = SERIALIZE_FIND_MEMBER(stream, "Translation");
+        if (m != stream.MemberEnd())
+            Deserialize(m->value, v.Translation, modifier);
+    }
+    {
+        const auto m = SERIALIZE_FIND_MEMBER(stream, "Scale");
+        if (m != stream.MemberEnd())
+            Deserialize(m->value, v.Scale, modifier);
+    }
+    {
+        const auto m = SERIALIZE_FIND_MEMBER(stream, "Orientation");
+        if (m != stream.MemberEnd())
+            Deserialize(m->value, v.Orientation, modifier);
+    }
 }
 
 bool Serialization::ShouldSerialize(const Matrix& v, const void* otherObj)
@@ -775,6 +788,18 @@ void Serialization::Deserialize(ISerializable::DeserializeStream& stream, Matrix
     DESERIALIZE_HELPER(stream, "M42", v.M42, 0);
     DESERIALIZE_HELPER(stream, "M43", v.M43, 0);
     DESERIALIZE_HELPER(stream, "M44", v.M44, 0);
+}
+
+bool Serialization::ShouldSerialize(const SceneObject* v, const SceneObject* other)
+{
+    bool result = v != other;
+    if (result && v && other && v->HasPrefabLink() && other->HasPrefabLink())
+    {
+        // Special case when saving reference to prefab object and the objects are different but the point to the same prefab object
+        // In that case, skip saving reference as it's defined in prefab (will be populated via IdsMapping during deserialization)
+        result &= v->GetPrefabObjectID() != other->GetPrefabObjectID();
+    }
+    return result;
 }
 
 #undef DESERIALIZE_HELPER

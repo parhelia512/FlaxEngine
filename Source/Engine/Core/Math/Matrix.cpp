@@ -1,7 +1,9 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Matrix.h"
+#include "Double4x4.h"
 #include "Matrix3x3.h"
+#include "Matrix3x4.h"
 #include "Vector2.h"
 #include "Quaternion.h"
 #include "Transform.h"
@@ -27,6 +29,12 @@ Matrix::Matrix(const Matrix3x3& matrix)
     M44 = 1.0f;
 }
 
+Matrix::Matrix(const Double4x4& matrix)
+{
+    for (int32 i = 0; i < 16; i++)
+        Raw[i] = (float)matrix.Raw[i];
+}
+
 String Matrix::ToString() const
 {
     return String::Format(TEXT("{}"), *this);
@@ -40,9 +48,7 @@ float Matrix::GetDeterminant() const
     const float temp4 = M31 * M44 - M34 * M41;
     const float temp5 = M31 * M43 - M33 * M41;
     const float temp6 = M31 * M42 - M32 * M41;
-    return M11 * (M22 * temp1 - M23 * temp2 + M24 * temp3) - M12 * (M21 * temp1 -
-                M23 * temp4 + M24 * temp5) + M13 * (M21 * temp2 - M22 * temp4 + M24 * temp6) -
-            M14 * (M21 * temp3 - M22 * temp5 + M23 * temp6);
+    return M11 * (M22 * temp1 - M23 * temp2 + M24 * temp3) - M12 * (M21 * temp1 -M23 * temp4 + M24 * temp5) + M13 * (M21 * temp2 - M22 * temp4 + M24 * temp6) - M14 * (M21 * temp3 - M22 * temp5 + M23 * temp6);
 }
 
 float Matrix::RotDeterminant() const
@@ -101,7 +107,7 @@ void Matrix::Decompose(Float3& scale, Float3& translation) const
 
 void Matrix::Decompose(Transform& transform) const
 {
-    Matrix rotationMatrix;
+    Matrix3x3 rotationMatrix;
     Float3 translation;
     Decompose(transform.Scale, rotationMatrix, translation);
     transform.Translation = translation;
@@ -110,12 +116,12 @@ void Matrix::Decompose(Transform& transform) const
 
 void Matrix::Decompose(Float3& scale, Quaternion& rotation, Float3& translation) const
 {
-    Matrix rotationMatrix;
+    Matrix3x3 rotationMatrix;
     Decompose(scale, rotationMatrix, translation);
     Quaternion::RotationMatrix(rotationMatrix, rotation);
 }
 
-void Matrix::Decompose(Float3& scale, Matrix& rotation, Float3& translation) const
+void Matrix::Decompose(Float3& scale, Matrix3x3& rotation, Float3& translation) const
 {
     // Get the translation
     translation = Float3(M41, M42, M43);
@@ -127,7 +133,7 @@ void Matrix::Decompose(Float3& scale, Matrix& rotation, Float3& translation) con
         Math::Sqrt(M31 * M31 + M32 * M32 + M33 * M33));
 
     // If any of the scaling factors are zero, than the rotation matrix can not exist
-    rotation = Identity;
+    rotation = Matrix3x3::Identity;
     if (scale.IsAnyZero())
         return;
 
@@ -137,12 +143,193 @@ void Matrix::Decompose(Float3& scale, Matrix& rotation, Float3& translation) con
     const auto right = Float3::Cross(up, at);
     rotation.SetRight(right);
     rotation.SetUp(up);
-    rotation.SetBackward(at);
+    rotation.SetForward(at);
 
     // In case of reflexions
     scale.X = Float3::Dot(right, GetRight()) > 0.0f ? scale.X : -scale.X;
     scale.Y = Float3::Dot(up, GetUp()) > 0.0f ? scale.Y : -scale.Y;
-    scale.Z = Float3::Dot(at, GetBackward()) > 0.0f ? scale.Z : -scale.Z;
+    scale.Z = Float3::Dot(at, GetForward()) > 0.0f ? scale.Z : -scale.Z;
+}
+
+void Matrix::Decompose(Float3& scale, Matrix& rotation, Float3& translation) const
+{
+    // [Deprecated on 20.02.2024, expires on 20.02.2026]
+    Matrix3x3 r;
+    Decompose(scale, r, translation);
+    rotation = Matrix(r);
+}
+
+bool Matrix::operator==(const Matrix& other) const
+{
+    for (int32 i = 0; i < 16; i++)
+    {
+        if (Math::NotNearEqual(other.Raw[i], Raw[i]))
+            return false;
+    }
+    return true;
+}
+
+void Matrix::Add(const Matrix& left, const Matrix& right, Matrix& result)
+{
+    result.M11 = left.M11 + right.M11;
+    result.M12 = left.M12 + right.M12;
+    result.M13 = left.M13 + right.M13;
+    result.M14 = left.M14 + right.M14;
+    result.M21 = left.M21 + right.M21;
+    result.M22 = left.M22 + right.M22;
+    result.M23 = left.M23 + right.M23;
+    result.M24 = left.M24 + right.M24;
+    result.M31 = left.M31 + right.M31;
+    result.M32 = left.M32 + right.M32;
+    result.M33 = left.M33 + right.M33;
+    result.M34 = left.M34 + right.M34;
+    result.M41 = left.M41 + right.M41;
+    result.M42 = left.M42 + right.M42;
+    result.M43 = left.M43 + right.M43;
+    result.M44 = left.M44 + right.M44;
+}
+
+void Matrix::Subtract(const Matrix& left, const Matrix& right, Matrix& result)
+{
+    result.M11 = left.M11 - right.M11;
+    result.M12 = left.M12 - right.M12;
+    result.M13 = left.M13 - right.M13;
+    result.M14 = left.M14 - right.M14;
+    result.M21 = left.M21 - right.M21;
+    result.M22 = left.M22 - right.M22;
+    result.M23 = left.M23 - right.M23;
+    result.M24 = left.M24 - right.M24;
+    result.M31 = left.M31 - right.M31;
+    result.M32 = left.M32 - right.M32;
+    result.M33 = left.M33 - right.M33;
+    result.M34 = left.M34 - right.M34;
+    result.M41 = left.M41 - right.M41;
+    result.M42 = left.M42 - right.M42;
+    result.M43 = left.M43 - right.M43;
+    result.M44 = left.M44 - right.M44;
+}
+
+void Matrix::Multiply(const Matrix& left, float right, Matrix& result)
+{
+    result.M11 = left.M11 * right;
+    result.M12 = left.M12 * right;
+    result.M13 = left.M13 * right;
+    result.M14 = left.M14 * right;
+    result.M21 = left.M21 * right;
+    result.M22 = left.M22 * right;
+    result.M23 = left.M23 * right;
+    result.M24 = left.M24 * right;
+    result.M31 = left.M31 * right;
+    result.M32 = left.M32 * right;
+    result.M33 = left.M33 * right;
+    result.M34 = left.M34 * right;
+    result.M41 = left.M41 * right;
+    result.M42 = left.M42 * right;
+    result.M43 = left.M43 * right;
+    result.M44 = left.M44 * right;
+}
+
+void Matrix::Multiply(const Matrix& left, const Matrix& right, Matrix& result)
+{
+    result.M11 = left.M11 * right.M11 + left.M12 * right.M21 + left.M13 * right.M31 + left.M14 * right.M41;
+    result.M12 = left.M11 * right.M12 + left.M12 * right.M22 + left.M13 * right.M32 + left.M14 * right.M42;
+    result.M13 = left.M11 * right.M13 + left.M12 * right.M23 + left.M13 * right.M33 + left.M14 * right.M43;
+    result.M14 = left.M11 * right.M14 + left.M12 * right.M24 + left.M13 * right.M34 + left.M14 * right.M44;
+    result.M21 = left.M21 * right.M11 + left.M22 * right.M21 + left.M23 * right.M31 + left.M24 * right.M41;
+    result.M22 = left.M21 * right.M12 + left.M22 * right.M22 + left.M23 * right.M32 + left.M24 * right.M42;
+    result.M23 = left.M21 * right.M13 + left.M22 * right.M23 + left.M23 * right.M33 + left.M24 * right.M43;
+    result.M24 = left.M21 * right.M14 + left.M22 * right.M24 + left.M23 * right.M34 + left.M24 * right.M44;
+    result.M31 = left.M31 * right.M11 + left.M32 * right.M21 + left.M33 * right.M31 + left.M34 * right.M41;
+    result.M32 = left.M31 * right.M12 + left.M32 * right.M22 + left.M33 * right.M32 + left.M34 * right.M42;
+    result.M33 = left.M31 * right.M13 + left.M32 * right.M23 + left.M33 * right.M33 + left.M34 * right.M43;
+    result.M34 = left.M31 * right.M14 + left.M32 * right.M24 + left.M33 * right.M34 + left.M34 * right.M44;
+    result.M41 = left.M41 * right.M11 + left.M42 * right.M21 + left.M43 * right.M31 + left.M44 * right.M41;
+    result.M42 = left.M41 * right.M12 + left.M42 * right.M22 + left.M43 * right.M32 + left.M44 * right.M42;
+    result.M43 = left.M41 * right.M13 + left.M42 * right.M23 + left.M43 * right.M33 + left.M44 * right.M43;
+    result.M44 = left.M41 * right.M14 + left.M42 * right.M24 + left.M43 * right.M34 + left.M44 * right.M44;
+}
+
+void Matrix::Divide(const Matrix& left, float right, Matrix& result)
+{
+    ASSERT(!Math::IsZero(right));
+    const float inv = 1.0f / right;
+
+    result.M11 = left.M11 * inv;
+    result.M12 = left.M12 * inv;
+    result.M13 = left.M13 * inv;
+    result.M14 = left.M14 * inv;
+    result.M21 = left.M21 * inv;
+    result.M22 = left.M22 * inv;
+    result.M23 = left.M23 * inv;
+    result.M24 = left.M24 * inv;
+    result.M31 = left.M31 * inv;
+    result.M32 = left.M32 * inv;
+    result.M33 = left.M33 * inv;
+    result.M34 = left.M34 * inv;
+    result.M41 = left.M41 * inv;
+    result.M42 = left.M42 * inv;
+    result.M43 = left.M43 * inv;
+    result.M44 = left.M44 * inv;
+}
+
+void Matrix::Divide(const Matrix& left, const Matrix& right, Matrix& result)
+{
+    result.M11 = left.M11 / right.M11;
+    result.M12 = left.M12 / right.M12;
+    result.M13 = left.M13 / right.M13;
+    result.M14 = left.M14 / right.M14;
+    result.M21 = left.M21 / right.M21;
+    result.M22 = left.M22 / right.M22;
+    result.M23 = left.M23 / right.M23;
+    result.M24 = left.M24 / right.M24;
+    result.M31 = left.M31 / right.M31;
+    result.M32 = left.M32 / right.M32;
+    result.M33 = left.M33 / right.M33;
+    result.M34 = left.M34 / right.M34;
+    result.M41 = left.M41 / right.M41;
+    result.M42 = left.M42 / right.M42;
+    result.M43 = left.M43 / right.M43;
+    result.M44 = left.M44 / right.M44;
+}
+
+void Matrix::Negate(const Matrix& value, Matrix& result)
+{
+    result.M11 = -value.M11;
+    result.M12 = -value.M12;
+    result.M13 = -value.M13;
+    result.M14 = -value.M14;
+    result.M21 = -value.M21;
+    result.M22 = -value.M22;
+    result.M23 = -value.M23;
+    result.M24 = -value.M24;
+    result.M31 = -value.M31;
+    result.M32 = -value.M32;
+    result.M33 = -value.M33;
+    result.M34 = -value.M34;
+    result.M41 = -value.M41;
+    result.M42 = -value.M42;
+    result.M43 = -value.M43;
+    result.M44 = -value.M44;
+}
+
+void Matrix::Lerp(const Matrix& start, const Matrix& end, float amount, Matrix& result)
+{
+    result.M11 = Math::Lerp(start.M11, end.M11, amount);
+    result.M12 = Math::Lerp(start.M12, end.M12, amount);
+    result.M13 = Math::Lerp(start.M13, end.M13, amount);
+    result.M14 = Math::Lerp(start.M14, end.M14, amount);
+    result.M21 = Math::Lerp(start.M21, end.M21, amount);
+    result.M22 = Math::Lerp(start.M22, end.M22, amount);
+    result.M23 = Math::Lerp(start.M23, end.M23, amount);
+    result.M24 = Math::Lerp(start.M24, end.M24, amount);
+    result.M31 = Math::Lerp(start.M31, end.M31, amount);
+    result.M32 = Math::Lerp(start.M32, end.M32, amount);
+    result.M33 = Math::Lerp(start.M33, end.M33, amount);
+    result.M34 = Math::Lerp(start.M34, end.M34, amount);
+    result.M41 = Math::Lerp(start.M41, end.M41, amount);
+    result.M42 = Math::Lerp(start.M42, end.M42, amount);
+    result.M43 = Math::Lerp(start.M43, end.M43, amount);
+    result.M44 = Math::Lerp(start.M44, end.M44, amount);
 }
 
 Matrix Matrix::Transpose(const Matrix& value)
@@ -594,7 +781,7 @@ void Matrix::Transformation(const Float3& scalingCenter, const Quaternion& scali
     result = Translation(-scalingCenter) * Transpose(sr) * Scaling(scaling) * sr * Translation(scalingCenter) * Translation(-rotationCenter) * RotationQuaternion(rotation) * Translation(rotationCenter) * Translation(translation);
 }
 
-void Matrix::Transformation2D(Float2& scalingCenter, float scalingRotation, const Float2& scaling, const Float2& rotationCenter, float rotation, const Float2& translation, Matrix& result)
+void Matrix::Transformation2D(const Float2& scalingCenter, float scalingRotation, const Float2& scaling, const Float2& rotationCenter, float rotation, const Float2& translation, Matrix& result)
 {
     result = Translation((Float3)-scalingCenter) * RotationZ(-scalingRotation) * Scaling((Float3)scaling) * RotationZ(scalingRotation) * Translation((Float3)scalingCenter) * Translation((Float3)-rotationCenter) * RotationZ(rotation) * Translation((Float3)rotationCenter) * Translation((Float3)translation);
     result.M33 = 1.0f;
@@ -680,6 +867,15 @@ void Matrix::CreateFromAxisAngle(const Float3& axis, float angle, Matrix& result
     result.M44 = 1.0f;
 }
 
+Vector3 Matrix::TransformVector(const Matrix& m, const Vector3& v)
+{
+    return Vector3(
+        m.Values[0][0] * v.Raw[0] + m.Values[1][0] * v.Raw[1] + m.Values[2][0] * v.Raw[2],
+        m.Values[0][1] * v.Raw[0] + m.Values[1][1] * v.Raw[1] + m.Values[2][1] * v.Raw[2],
+        m.Values[0][2] * v.Raw[0] + m.Values[1][2] * v.Raw[1] + m.Values[2][2] * v.Raw[2]
+    );
+}
+
 Float4 Matrix::TransformPosition(const Matrix& m, const Float3& v)
 {
     return Float4(
@@ -698,4 +894,181 @@ Float4 Matrix::TransformPosition(const Matrix& m, const Float4& v)
         m.Values[0][2] * v.Raw[0] + m.Values[1][2] * v.Raw[1] + m.Values[2][2] * v.Raw[2] + m.Values[3][2] * v.Raw[3],
         m.Values[0][3] * v.Raw[0] + m.Values[1][3] * v.Raw[1] + m.Values[2][3] * v.Raw[2] + m.Values[3][3] * v.Raw[3]
     );
+}
+
+void Matrix3x4::SetMatrix(const Matrix& m)
+{
+    const float* src = m.Raw;
+    float* dst = Raw;
+    dst[0] = src[0];
+    dst[1] = src[1];
+    dst[2] = src[2];
+    dst[3] = src[3];
+    dst[4] = src[4];
+    dst[5] = src[5];
+    dst[6] = src[6];
+    dst[7] = src[7];
+    dst[8] = src[8];
+    dst[9] = src[9];
+    dst[10] = src[10];
+    dst[11] = src[11];
+}
+
+void Matrix3x4::SetMatrixTranspose(const Matrix& m)
+{
+    const float* src = m.Raw;
+    float* dst = Raw;
+    dst[0] = src[0];
+    dst[1] = src[4];
+    dst[2] = src[8];
+    dst[3] = src[12];
+    dst[4] = src[1];
+    dst[5] = src[5];
+    dst[6] = src[9];
+    dst[7] = src[13];
+    dst[8] = src[2];
+    dst[9] = src[6];
+    dst[10] = src[10];
+    dst[11] = src[14];
+}
+
+Double4x4::Double4x4(const Matrix& matrix)
+{
+    for (int32 i = 0; i < 16; i++)
+        Raw[i] = matrix.Raw[i];
+}
+
+void Double4x4::Invert(const Double4x4& value, Double4x4& result)
+{
+    const double b0 = value.M31 * value.M42 - value.M32 * value.M41;
+    const double b1 = value.M31 * value.M43 - value.M33 * value.M41;
+    const double b2 = value.M34 * value.M41 - value.M31 * value.M44;
+    const double b3 = value.M32 * value.M43 - value.M33 * value.M42;
+    const double b4 = value.M34 * value.M42 - value.M32 * value.M44;
+    const double b5 = value.M33 * value.M44 - value.M34 * value.M43;
+
+    const double d11 = value.M22 * b5 + value.M23 * b4 + value.M24 * b3;
+    const double d12 = value.M21 * b5 + value.M23 * b2 + value.M24 * b1;
+    const double d13 = value.M21 * -b4 + value.M22 * b2 + value.M24 * b0;
+    const double d14 = value.M21 * b3 + value.M22 * -b1 + value.M23 * b0;
+
+    double det = value.M11 * d11 - value.M12 * d12 + value.M13 * d13 - value.M14 * d14;
+    if (Math::Abs(det) <= 1e-12)
+    {
+        Platform::MemoryClear(&result, sizeof(Double4x4));
+        return;
+    }
+
+    det = 1.0 / det;
+
+    const double a0 = value.M11 * value.M22 - value.M12 * value.M21;
+    const double a1 = value.M11 * value.M23 - value.M13 * value.M21;
+    const double a2 = value.M14 * value.M21 - value.M11 * value.M24;
+    const double a3 = value.M12 * value.M23 - value.M13 * value.M22;
+    const double a4 = value.M14 * value.M22 - value.M12 * value.M24;
+    const double a5 = value.M13 * value.M24 - value.M14 * value.M23;
+
+    const double d21 = value.M12 * b5 + value.M13 * b4 + value.M14 * b3;
+    const double d22 = value.M11 * b5 + value.M13 * b2 + value.M14 * b1;
+    const double d23 = value.M11 * -b4 + value.M12 * b2 + value.M14 * b0;
+    const double d24 = value.M11 * b3 + value.M12 * -b1 + value.M13 * b0;
+
+    const double d31 = value.M42 * a5 + value.M43 * a4 + value.M44 * a3;
+    const double d32 = value.M41 * a5 + value.M43 * a2 + value.M44 * a1;
+    const double d33 = value.M41 * -a4 + value.M42 * a2 + value.M44 * a0;
+    const double d34 = value.M41 * a3 + value.M42 * -a1 + value.M43 * a0;
+
+    const double d41 = value.M32 * a5 + value.M33 * a4 + value.M34 * a3;
+    const double d42 = value.M31 * a5 + value.M33 * a2 + value.M34 * a1;
+    const double d43 = value.M31 * -a4 + value.M32 * a2 + value.M34 * a0;
+    const double d44 = value.M31 * a3 + value.M32 * -a1 + value.M33 * a0;
+
+    result.M11 = +d11 * det;
+    result.M12 = -d21 * det;
+    result.M13 = +d31 * det;
+    result.M14 = -d41 * det;
+    result.M21 = -d12 * det;
+    result.M22 = +d22 * det;
+    result.M23 = -d32 * det;
+    result.M24 = +d42 * det;
+    result.M31 = +d13 * det;
+    result.M32 = -d23 * det;
+    result.M33 = +d33 * det;
+    result.M34 = -d43 * det;
+    result.M41 = -d14 * det;
+    result.M42 = +d24 * det;
+    result.M43 = -d34 * det;
+    result.M44 = +d44 * det;
+}
+
+void Double4x4::Multiply(const Double4x4& left, const Double4x4& right, Double4x4& result)
+{
+    result.M11 = left.M11 * right.M11 + left.M12 * right.M21 + left.M13 * right.M31 + left.M14 * right.M41;
+    result.M12 = left.M11 * right.M12 + left.M12 * right.M22 + left.M13 * right.M32 + left.M14 * right.M42;
+    result.M13 = left.M11 * right.M13 + left.M12 * right.M23 + left.M13 * right.M33 + left.M14 * right.M43;
+    result.M14 = left.M11 * right.M14 + left.M12 * right.M24 + left.M13 * right.M34 + left.M14 * right.M44;
+    result.M21 = left.M21 * right.M11 + left.M22 * right.M21 + left.M23 * right.M31 + left.M24 * right.M41;
+    result.M22 = left.M21 * right.M12 + left.M22 * right.M22 + left.M23 * right.M32 + left.M24 * right.M42;
+    result.M23 = left.M21 * right.M13 + left.M22 * right.M23 + left.M23 * right.M33 + left.M24 * right.M43;
+    result.M24 = left.M21 * right.M14 + left.M22 * right.M24 + left.M23 * right.M34 + left.M24 * right.M44;
+    result.M31 = left.M31 * right.M11 + left.M32 * right.M21 + left.M33 * right.M31 + left.M34 * right.M41;
+    result.M32 = left.M31 * right.M12 + left.M32 * right.M22 + left.M33 * right.M32 + left.M34 * right.M42;
+    result.M33 = left.M31 * right.M13 + left.M32 * right.M23 + left.M33 * right.M33 + left.M34 * right.M43;
+    result.M34 = left.M31 * right.M14 + left.M32 * right.M24 + left.M33 * right.M34 + left.M34 * right.M44;
+    result.M41 = left.M41 * right.M11 + left.M42 * right.M21 + left.M43 * right.M31 + left.M44 * right.M41;
+    result.M42 = left.M41 * right.M12 + left.M42 * right.M22 + left.M43 * right.M32 + left.M44 * right.M42;
+    result.M43 = left.M41 * right.M13 + left.M42 * right.M23 + left.M43 * right.M33 + left.M44 * right.M43;
+    result.M44 = left.M41 * right.M14 + left.M42 * right.M24 + left.M43 * right.M34 + left.M44 * right.M44;
+}
+
+void Double4x4::Transformation(const Float3& scaling, const Quaternion& rotation, const Vector3& translation, Double4x4& result)
+{
+    // Equivalent to:
+    //result =
+    //    Matrix.Scaling(scaling)
+    //    *Matrix.RotationX(rotation.X)
+    //    *Matrix.RotationY(rotation.Y)
+    //    *Matrix.RotationZ(rotation.Z)
+    //    *Matrix.Position(translation);
+
+    // Rotation
+    const float xx = rotation.X * rotation.X;
+    const float yy = rotation.Y * rotation.Y;
+    const float zz = rotation.Z * rotation.Z;
+    const float xy = rotation.X * rotation.Y;
+    const float zw = rotation.Z * rotation.W;
+    const float zx = rotation.Z * rotation.X;
+    const float yw = rotation.Y * rotation.W;
+    const float yz = rotation.Y * rotation.Z;
+    const float xw = rotation.X * rotation.W;
+    result.M11 = 1.0f - 2.0f * (yy + zz);
+    result.M12 = 2.0f * (xy + zw);
+    result.M13 = 2.0f * (zx - yw);
+    result.M21 = 2.0f * (xy - zw);
+    result.M22 = 1.0f - 2.0f * (zz + xx);
+    result.M23 = 2.0f * (yz + xw);
+    result.M31 = 2.0f * (zx + yw);
+    result.M32 = 2.0f * (yz - xw);
+    result.M33 = 1.0f - 2.0f * (yy + xx);
+
+    // Position
+    result.M41 = translation.X;
+    result.M42 = translation.Y;
+    result.M43 = translation.Z;
+
+    // Scale
+    result.M11 *= scaling.X;
+    result.M12 *= scaling.X;
+    result.M13 *= scaling.X;
+    result.M21 *= scaling.Y;
+    result.M22 *= scaling.Y;
+    result.M23 *= scaling.Y;
+    result.M31 *= scaling.Z;
+    result.M32 *= scaling.Z;
+    result.M33 *= scaling.Z;
+
+    result.M14 = 0.0;
+    result.M24 = 0.0;
+    result.M34 = 0.0;
+    result.M44 = 1.0;
 }

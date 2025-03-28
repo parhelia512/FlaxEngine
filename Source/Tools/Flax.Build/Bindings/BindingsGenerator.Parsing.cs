@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -45,6 +45,20 @@ namespace Flax.Build.Bindings
                 ScopeInfo = ScopeTypeStack.Peek();
                 CurrentAccessLevel = ScopeAccessStack.Pop();
             }
+        }
+
+        private class ParseException : Exception
+        {
+            public ParseException(ref ParsingContext context, string msg)
+            : base(GetParseErrorLocation(ref context, msg))
+            {
+            }
+        }
+
+        private static string GetParseErrorLocation(ref ParsingContext context, string msg)
+        {
+            // Make it a link clickable in Visual Studio build output
+            return $"{context.File.Name}({context.Tokenizer.CurrentLine}): {msg}";
         }
 
         private static string[] ParseComment(ref ParsingContext context)
@@ -171,6 +185,18 @@ namespace Flax.Build.Bindings
                             tag.Value = tag.Value.Substring(1, tag.Value.Length - 2);
                         if (tag.Value.Contains("\\\""))
                             tag.Value = tag.Value.Replace("\\\"", "\"");
+                        token = context.Tokenizer.NextToken();
+                        if (token.Type == TokenType.Multiply)
+                            tag.Value += token.Value;
+                        else if (token.Type == TokenType.LeftAngleBracket)
+                        {
+                            context.Tokenizer.SkipUntil(TokenType.RightAngleBracket, out var s);
+                            tag.Value += '<';
+                            tag.Value += s;
+                            tag.Value += '>';
+                        }
+                        else
+                            context.Tokenizer.PreviousToken();
                         parameters.Add(tag);
                         break;
                     case TokenType.Whitespace:
@@ -180,7 +206,7 @@ namespace Flax.Build.Bindings
                     case TokenType.RightParent:
                         parameters.Add(tag);
                         return parameters;
-                    default: throw new Exception($"Expected right parent or next argument, but got {token.Type}.");
+                    default: throw new ParseException(ref context, $"Expected right parent or next argument, but got {token.Type}.");
                     }
                 }
             }
@@ -223,6 +249,11 @@ namespace Flax.Build.Bindings
             }
 
             // Forward type
+            if (token.Value == "enum")
+            {
+                context.Tokenizer.SkipUntil(TokenType.Identifier);
+                token = context.Tokenizer.CurrentToken;
+            }
             if (token.Value == "class")
             {
                 context.Tokenizer.SkipUntil(TokenType.Identifier);
@@ -249,7 +280,6 @@ namespace Flax.Build.Bindings
                         type.GenericArgs.Add(argType);
                     token = context.Tokenizer.NextToken();
                 } while (token.Type != TokenType.RightAngleBracket);
-
                 token = context.Tokenizer.NextToken();
             }
 
@@ -302,7 +332,7 @@ namespace Flax.Build.Bindings
             if (context.PreprocessorDefines.TryGetValue(length, out var define))
                 length = define;
             if (!int.TryParse(length, out type.ArraySize))
-                throw new Exception($"Failed to parse the field {entry} array size '{length}'");
+                throw new ParseException(ref context, $"Failed to parse the field {entry} array size '{length}'");
         }
 
         private static List<FunctionInfo.ParameterInfo> ParseFunctionParameters(ref ParsingContext context)
@@ -354,7 +384,7 @@ namespace Flax.Build.Bindings
                             if (valid)
                                 break;
                             var location = "function parameter";
-                            Log.Warning($"Unknown or not supported tag parameter {tag} used on {location} at line {context.Tokenizer.CurrentLine}");
+                            Log.Warning(GetParseErrorLocation(ref context, $"Unknown or not supported tag parameter '{tag}' used on '{location}'"));
                             break;
                         }
                     }
@@ -366,7 +396,22 @@ namespace Flax.Build.Bindings
 
                 // Read parameter type and name
                 currentParam.Type = ParseType(ref context);
-                currentParam.Name = context.Tokenizer.ExpectToken(TokenType.Identifier).Value;
+                token = context.Tokenizer.NextToken();
+                if (token.Type == TokenType.Identifier)
+                {
+                    currentParam.Name = token.Value;
+                }
+                // Support nameless arguments. assume optional usage
+                else
+                {
+                    context.Tokenizer.PreviousToken();
+                    if (string.IsNullOrEmpty(currentParam.Attributes))
+                        currentParam.Attributes = "Optional";
+                    else
+                        currentParam.Attributes += ", Optional";
+                    currentParam.Name = $"namelessArg{parameters.Count}";
+                }
+
                 if (currentParam.IsOut && (currentParam.Type.IsPtr || currentParam.Type.IsRef) && currentParam.Type.Type.EndsWith("*"))
                 {
                     // Pointer to value passed as output pointer
@@ -483,8 +528,7 @@ namespace Flax.Build.Bindings
                         desc.Inheritance = new List<TypeInfo>();
                     desc.Inheritance.Add(inheritType);
                     token = context.Tokenizer.NextToken();
-                    while (token.Type == TokenType.CommentSingleLine 
-                        || token.Type == TokenType.CommentMultiLine)
+                    while (token.Type == TokenType.CommentSingleLine || token.Type == TokenType.CommentMultiLine)
                     {
                         token = context.Tokenizer.NextToken();
                     }
@@ -507,15 +551,19 @@ namespace Flax.Build.Bindings
                     }
                     if (token.Type == TokenType.LeftAngleBracket)
                     {
-                        var genericType = context.Tokenizer.ExpectToken(TokenType.Identifier);
-                        token = context.Tokenizer.ExpectToken(TokenType.RightAngleBracket);
-                        inheritType.GenericArgs = new List<TypeInfo>
+                        inheritType.GenericArgs = new List<TypeInfo>();
+                        while (true)
                         {
-                            new TypeInfo
-                            {
-                                Type = genericType.Value,
-                            }
-                        };
+                            token = context.Tokenizer.NextToken();
+                            if (token.Type == TokenType.RightAngleBracket)
+                                break;
+                            if (token.Type == TokenType.Comma)
+                                continue;
+                            if (token.Type == TokenType.Identifier)
+                                inheritType.GenericArgs.Add(new TypeInfo { Type = token.Value });
+                            else
+                                throw new ParseException(ref context, "Incorrect inheritance");
+                        }
 
                         // TODO: find better way to resolve this (custom base type attribute?)
                         if (inheritType.Type == "ShaderAssetTypeBase")
@@ -563,7 +611,7 @@ namespace Flax.Build.Bindings
             // Read 'class' keyword
             var token = context.Tokenizer.NextToken();
             if (token.Value != "class")
-                throw new Exception($"Invalid {ApiTokens.Class} usage (expected 'class' keyword but got '{token.Value} {context.Tokenizer.NextToken().Value}').");
+                throw new ParseException(ref context, $"Invalid {ApiTokens.Class} usage (expected 'class' keyword but got '{token.Value} {context.Tokenizer.NextToken().Value}').");
 
             // Read specifiers
             while (true)
@@ -571,7 +619,13 @@ namespace Flax.Build.Bindings
                 token = context.Tokenizer.NextToken();
                 if (!desc.IsDeprecated && token.Value == "DEPRECATED")
                 {
-                    desc.IsDeprecated = true;
+                    token = context.Tokenizer.NextToken();
+                    string message = "";
+                    if (token.Type == TokenType.LeftParent)
+                        context.Tokenizer.SkipUntil(TokenType.RightParent, out message);
+                    else
+                        context.Tokenizer.PreviousToken();
+                    desc.DeprecatedMessage = message.Trim('"');
                 }
                 else
                 {
@@ -634,7 +688,7 @@ namespace Flax.Build.Bindings
                     desc.Namespace = tag.Value;
                     break;
                 case "marshalas":
-                    desc.MarshalAs = tag.Value;
+                    desc.MarshalAs = TypeInfo.FromString(tag.Value);
                     break;
                 case "tag":
                     ParseTag(ref desc.Tags, tag);
@@ -644,7 +698,7 @@ namespace Flax.Build.Bindings
                     ParseTypeTag?.Invoke(ref valid, tag, desc);
                     if (valid)
                         break;
-                    Log.Warning($"Unknown or not supported tag parameter {tag} used on {desc.Name} at line {context.Tokenizer.CurrentLine}");
+                    Log.Warning(GetParseErrorLocation(ref context, $"Unknown or not supported tag parameter '{tag}' used on '{desc.Name}'"));
                     break;
                 }
             }
@@ -672,7 +726,7 @@ namespace Flax.Build.Bindings
             // Read 'class' keyword
             var token = context.Tokenizer.NextToken();
             if (token.Value != "class")
-                throw new Exception($"Invalid {ApiTokens.Interface} usage (expected 'class' keyword but got '{token.Value} {context.Tokenizer.NextToken().Value}').");
+                throw new ParseException(ref context, $"Invalid {ApiTokens.Interface} usage (expected 'class' keyword but got '{token.Value} {context.Tokenizer.NextToken().Value}').");
 
             // Read specifiers
             while (true)
@@ -680,7 +734,13 @@ namespace Flax.Build.Bindings
                 token = context.Tokenizer.NextToken();
                 if (!desc.IsDeprecated && token.Value == "DEPRECATED")
                 {
-                    desc.IsDeprecated = true;
+                    token = context.Tokenizer.NextToken();
+                    string message = "";
+                    if (token.Type == TokenType.LeftParent)
+                        context.Tokenizer.SkipUntil(TokenType.RightParent, out message);
+                    else
+                        context.Tokenizer.PreviousToken();
+                    desc.DeprecatedMessage = message.Trim('"');
                 }
                 else
                 {
@@ -735,7 +795,7 @@ namespace Flax.Build.Bindings
                     ParseTypeTag?.Invoke(ref valid, tag, desc);
                     if (valid)
                         break;
-                    Log.Warning($"Unknown or not supported tag parameter {tag} used on {desc.Name} at line {context.Tokenizer.CurrentLine}");
+                    Log.Warning(GetParseErrorLocation(ref context, $"Unknown or not supported tag parameter '{tag}' used on '{desc.Name}'"));
                     break;
                 }
             }
@@ -779,8 +839,14 @@ namespace Flax.Build.Bindings
                 }
                 else if (!desc.IsDeprecated && token.Value == "DEPRECATED")
                 {
-                    desc.IsDeprecated = true;
-                    context.Tokenizer.NextToken();
+                    token = context.Tokenizer.NextToken();
+                    string message = "";
+                    if (token.Type == TokenType.LeftParent)
+                    {
+                        context.Tokenizer.SkipUntil(TokenType.RightParent, out message);
+                        context.Tokenizer.NextToken();
+                    }
+                    desc.DeprecatedMessage = message.Trim('"');
                 }
                 else
                 {
@@ -790,6 +856,7 @@ namespace Flax.Build.Bindings
             }
 
             // Read return type
+            // Handle if "auto" later
             desc.ReturnType = ParseType(ref context);
 
             // Read name
@@ -800,14 +867,20 @@ namespace Flax.Build.Bindings
             // Read parameters
             desc.Parameters.AddRange(ParseFunctionParameters(ref context));
 
-            // Read ';' or 'const' or 'override' or '= 0' or '{'
+            // Read ';' or 'const' or 'override' or '= 0' or '{' or '-'
             while (true)
             {
-                var token = context.Tokenizer.ExpectAnyTokens(new[] { TokenType.SemiColon, TokenType.LeftCurlyBrace, TokenType.Equal, TokenType.Identifier });
+                var token = context.Tokenizer.ExpectAnyTokens(new[] { TokenType.SemiColon, TokenType.LeftCurlyBrace, TokenType.Equal, TokenType.Sub, TokenType.Identifier });
                 if (token.Type == TokenType.Equal)
                 {
                     context.Tokenizer.SkipUntil(TokenType.SemiColon);
                     break;
+                }
+                // Support auto FunctionName() -> Type
+                else if (token.Type == TokenType.Sub && desc.ReturnType.ToString() == "auto")
+                {
+                    context.Tokenizer.SkipUntil(TokenType.GreaterThan);
+                    desc.ReturnType = ParseType(ref context);
                 }
                 else if (token.Type == TokenType.Identifier)
                 {
@@ -815,13 +888,13 @@ namespace Flax.Build.Bindings
                     {
                     case "const":
                         if (desc.IsConst)
-                            throw new Exception($"Invalid double 'const' specifier in function {desc.Name} at line {context.Tokenizer.CurrentLine}.");
+                            throw new ParseException(ref context, $"Invalid double 'const' specifier in function {desc.Name}");
                         desc.IsConst = true;
                         break;
                     case "override":
                         desc.IsVirtual = true;
                         break;
-                    default: throw new Exception($"Unknown identifier '{token.Value}' in function {desc.Name} at line {context.Tokenizer.CurrentLine}.");
+                    default: throw new ParseException(ref context, $"Unknown identifier '{token.Value}' in function {desc.Name}");
                     }
                 }
                 else if (token.Type == TokenType.LeftCurlyBrace)
@@ -875,7 +948,7 @@ namespace Flax.Build.Bindings
                     ParseMemberTag?.Invoke(ref valid, tag, desc);
                     if (valid)
                         break;
-                    Log.Warning($"Unknown or not supported tag parameter {tag} used on {desc.Name} at line {context.Tokenizer.CurrentLine}");
+                    Log.Warning(GetParseErrorLocation(ref context, $"Unknown or not supported tag parameter '{tag}' used on '{desc.Name}'"));
                     break;
                 }
             }
@@ -892,11 +965,11 @@ namespace Flax.Build.Bindings
 
             var classInfo = context.ScopeInfo as ClassInfo;
             if (classInfo == null)
-                throw new Exception($"Found property {propertyName} outside the class at line {context.Tokenizer.CurrentLine}.");
+                throw new ParseException(ref context, $"Found property {propertyName} outside the class");
 
             var isGetter = !functionInfo.ReturnType.IsVoid;
             if (!isGetter && functionInfo.Parameters.Count == 0)
-                throw new Exception($"Property {propertyName} setter method in class {classInfo.Name} has to have value parameter to set (line {context.Tokenizer.CurrentLine}).");
+                throw new ParseException(ref context, $"Property {propertyName} setter method in class {classInfo.Name} has to have value parameter to set (line {context.Tokenizer.CurrentLine}).");
             var propertyType = isGetter ? functionInfo.ReturnType : functionInfo.Parameters[0].Type;
 
             var propertyInfo = classInfo.Properties.FirstOrDefault(x => x.Name == propertyName);
@@ -917,7 +990,7 @@ namespace Flax.Build.Bindings
             else
             {
                 if (propertyInfo.IsStatic != functionInfo.IsStatic)
-                    throw new Exception($"Property {propertyName} in class {classInfo.Name} has to have both getter and setter methods static or non-static (line {context.Tokenizer.CurrentLine}).");
+                    throw new ParseException(ref context, $"Property {propertyName} in class {classInfo.Name} has to have both getter and setter methods static or non-static (line {context.Tokenizer.CurrentLine}).");
             }
             if (functionInfo.Tags != null)
             {
@@ -934,15 +1007,15 @@ namespace Flax.Build.Bindings
             }
 
             if (isGetter && propertyInfo.Getter != null)
-                throw new Exception($"Property {propertyName} in class {classInfo.Name} cannot have multiple getter method (line {context.Tokenizer.CurrentLine}). Getter methods of properties must return value, while setters take this as a parameter.");
+                throw new ParseException(ref context, $"Property {propertyName} in class {classInfo.Name} cannot have multiple getter method (line {context.Tokenizer.CurrentLine}). Getter methods of properties must return value, while setters take this as a parameter.");
             if (!isGetter && propertyInfo.Setter != null)
-                throw new Exception($"Property {propertyName} in class {classInfo.Name} cannot have multiple setter method (line {context.Tokenizer.CurrentLine}). Getter methods of properties must return value, while setters take this as a parameter.");
+                throw new ParseException(ref context, $"Property {propertyName} in class {classInfo.Name} cannot have multiple setter method (line {context.Tokenizer.CurrentLine}). Getter methods of properties must return value, while setters take this as a parameter.");
 
             if (isGetter)
                 propertyInfo.Getter = functionInfo;
             else
                 propertyInfo.Setter = functionInfo;
-            propertyInfo.IsDeprecated |= functionInfo.IsDeprecated;
+            propertyInfo.DeprecatedMessage = functionInfo.DeprecatedMessage;
             propertyInfo.IsHidden |= functionInfo.IsHidden;
 
             if (propertyInfo.Getter != null && propertyInfo.Setter != null)
@@ -963,7 +1036,7 @@ namespace Flax.Build.Bindings
                         return propertyInfo;
                     if (getterType.Type == "Array" && setterType.Type == "Span" && getterType.GenericArgs?.Count == 1 && setterType.GenericArgs?.Count == 1 && getterType.GenericArgs[0].Equals(setterType.GenericArgs[0]))
                         return propertyInfo;
-                    throw new Exception($"Property {propertyName} in class {classInfo.Name} (line {context.Tokenizer.CurrentLine}) has mismatching getter return type ({getterType}) and setter parameter type ({setterType}). Both getter and setter methods must use the same value type used for property.");
+                    throw new ParseException(ref context, $"Property {propertyName} in class {classInfo.Name} (line {context.Tokenizer.CurrentLine}) has mismatching getter return type ({getterType}) and setter parameter type ({setterType}). Both getter and setter methods must use the same value type used for property.");
                 }
 
                 if (propertyInfo.Comment != null)
@@ -996,7 +1069,7 @@ namespace Flax.Build.Bindings
             // Read 'enum' or `enum class` keywords
             var token = context.Tokenizer.NextToken();
             if (token.Value != "enum")
-                throw new Exception($"Invalid {ApiTokens.Enum} usage at line {context.Tokenizer.CurrentLine} (expected 'enum' keyword but got '{token.Value} {context.Tokenizer.NextToken().Value}').");
+                throw new ParseException(ref context, $"Invalid {ApiTokens.Enum} usage (expected 'enum' keyword but got '{token.Value} {context.Tokenizer.NextToken().Value}').");
             token = context.Tokenizer.NextToken();
             if (token.Value != "class")
                 context.Tokenizer.PreviousToken();
@@ -1007,7 +1080,13 @@ namespace Flax.Build.Bindings
                 token = context.Tokenizer.NextToken();
                 if (!desc.IsDeprecated && token.Value == "DEPRECATED")
                 {
-                    desc.IsDeprecated = true;
+                    token = context.Tokenizer.NextToken();
+                    string message = "";
+                    if (token.Type == TokenType.LeftParent)
+                        context.Tokenizer.SkipUntil(TokenType.RightParent, out message);
+                    else
+                        context.Tokenizer.PreviousToken();
+                    desc.DeprecatedMessage = message.Trim('"');
                 }
                 else
                 {
@@ -1079,7 +1158,7 @@ namespace Flax.Build.Bindings
                                 entry.Attributes = tag.Value;
                                 break;
                             default:
-                                Log.Warning($"Unknown or not supported tag parameter {tag} used on {desc.Name + " enum entry"} at line {context.Tokenizer.CurrentLine}");
+                                Log.Warning(GetParseErrorLocation(ref context, $"Unknown or not supported tag parameter '{tag}' used on '{desc.Name}'"));
                                 break;
                             }
                         }
@@ -1153,7 +1232,7 @@ namespace Flax.Build.Bindings
                     ParseTypeTag?.Invoke(ref valid, tag, desc);
                     if (valid)
                         break;
-                    Log.Warning($"Unknown or not supported tag parameter {tag} used on {desc.Name} at line {context.Tokenizer.CurrentLine}");
+                    Log.Warning(GetParseErrorLocation(ref context, $"Unknown or not supported tag parameter '{tag}' used on '{desc.Name}'"));
                     break;
                 }
             }
@@ -1176,7 +1255,7 @@ namespace Flax.Build.Bindings
             // Read 'struct' keyword
             var token = context.Tokenizer.NextToken();
             if (token.Value != "struct")
-                throw new Exception($"Invalid {ApiTokens.Struct} usage (expected 'struct' keyword but got '{token.Value} {context.Tokenizer.NextToken().Value}').");
+                throw new ParseException(ref context, $"Invalid {ApiTokens.Struct} usage (expected 'struct' keyword but got '{token.Value} {context.Tokenizer.NextToken().Value}').");
 
             // Read name
             desc.Name = desc.NativeName = ParseName(ref context);
@@ -1223,7 +1302,7 @@ namespace Flax.Build.Bindings
                     desc.Namespace = tag.Value;
                     break;
                 case "marshalas":
-                    desc.MarshalAs = tag.Value;
+                    desc.MarshalAs = TypeInfo.FromString(tag.Value);
                     break;
                 case "tag":
                     ParseTag(ref desc.Tags, tag);
@@ -1233,7 +1312,7 @@ namespace Flax.Build.Bindings
                     ParseTypeTag?.Invoke(ref valid, tag, desc);
                     if (valid)
                         break;
-                    Log.Warning($"Unknown or not supported tag parameter {tag} used on {desc.Name} at line {context.Tokenizer.CurrentLine}");
+                    Log.Warning(GetParseErrorLocation(ref context, $"Unknown or not supported tag parameter '{tag}' used on '{desc.Name}'"));
                     break;
                 }
             }
@@ -1282,8 +1361,14 @@ namespace Flax.Build.Bindings
                 }
                 else if (!desc.IsDeprecated && token.Value == "DEPRECATED")
                 {
-                    desc.IsDeprecated = true;
-                    context.Tokenizer.NextToken();
+                    token = context.Tokenizer.NextToken();
+                    string message = "";
+                    if (token.Type == TokenType.LeftParent)
+                    {
+                        context.Tokenizer.SkipUntil(TokenType.RightParent, out message);
+                        context.Tokenizer.NextToken();
+                    }
+                    desc.DeprecatedMessage = message.Trim('"');
                 }
                 else
                 {
@@ -1299,10 +1384,16 @@ namespace Flax.Build.Bindings
             desc.Name = ParseName(ref context);
 
             // Read ';' or default value or array size or bit-field size
-            token = context.Tokenizer.ExpectAnyTokens(new[] { TokenType.SemiColon, TokenType.Equal, TokenType.LeftBracket, TokenType.Colon });
+            token = context.Tokenizer.ExpectAnyTokens(new[] { TokenType.SemiColon, TokenType.Equal, TokenType.LeftBracket, TokenType.LeftCurlyBrace, TokenType.Colon });
             if (token.Type == TokenType.Equal)
             {
                 context.Tokenizer.SkipUntil(TokenType.SemiColon, out desc.DefaultValue, false);
+            }
+            // Handle ex: API_FIELD() Type FieldName {DefaultValue};
+            else if (token.Type == TokenType.LeftCurlyBrace)
+            {
+                context.Tokenizer.SkipUntil(TokenType.SemiColon, out desc.DefaultValue, false);
+                desc.DefaultValue = '{' + desc.DefaultValue;
             }
             else if (token.Type == TokenType.LeftBracket)
             {
@@ -1366,7 +1457,7 @@ namespace Flax.Build.Bindings
                     ParseMemberTag?.Invoke(ref valid, tag, desc);
                     if (valid)
                         break;
-                    Log.Warning($"Unknown or not supported tag parameter {tag} used on {desc.Name} at line {context.Tokenizer.CurrentLine}");
+                    Log.Warning(GetParseErrorLocation(ref context, $"Unknown or not supported tag parameter '{tag}' used on '{desc.Name}'"));
                     break;
                 }
             }
@@ -1396,7 +1487,7 @@ namespace Flax.Build.Bindings
             if (desc.Type.Type == "Action")
                 desc.Type = new TypeInfo { Type = "Delegate", GenericArgs = new List<TypeInfo>() };
             else if (desc.Type.Type != "Delegate")
-                throw new Exception($"Invalid {ApiTokens.Event} type. Only Action and Delegate<> types are supported. '{desc.Type}' used on event at line {context.Tokenizer.CurrentLine}.");
+                throw new ParseException(ref context, $"Invalid {ApiTokens.Event} type. Only Action and Delegate<> types are supported. '{desc.Type}' used on event.");
 
             // Read name
             desc.Name = ParseName(ref context);
@@ -1438,11 +1529,53 @@ namespace Flax.Build.Bindings
                     ParseMemberTag?.Invoke(ref valid, tag, desc);
                     if (valid)
                         break;
-                    Log.Warning($"Unknown or not supported tag parameter {tag} used on {desc.Name} at line {context.Tokenizer.CurrentLine}");
+                    Log.Warning(GetParseErrorLocation(ref context, $"Unknown or not supported tag parameter '{tag}' used on '{desc.Name}'"));
                     break;
                 }
             }
             return desc;
+        }
+
+        private static string ParseString(ref ParsingContext context)
+        {
+            // Read string (support multi-line string literals)
+            string str = string.Empty;
+            int startLine = -1;
+            while (true)
+            {
+                var token = context.Tokenizer.NextToken();
+                if (token.Type == TokenType.String)
+                {
+                    if (startLine == -1)
+                        startLine = context.Tokenizer.CurrentLine;
+                    else if (startLine != context.Tokenizer.CurrentLine)
+                        str += "\n";
+                    var tokenStr = token.Value;
+                    if (tokenStr.Length >= 2 && tokenStr[0] == '\"' && tokenStr[^1] == '\"')
+                        tokenStr = tokenStr.Substring(1, tokenStr.Length - 2);
+                    str += tokenStr;
+                }
+                else if (token.Type == TokenType.EndOfFile)
+                {
+                    break;
+                }
+                else
+                {
+                    if (str == string.Empty)
+                        throw new Exception($"Expected {TokenType.String}, but got {token} at line {context.Tokenizer.CurrentLine}.");
+                    context.Tokenizer.PreviousToken();
+                    break;
+                }
+            }
+
+            // Apply automatic formatting for special characters
+            str = str.Replace("\\\"", "\"");
+            str = str.Replace("\\n", "\n");
+            str = str.Replace("\\\n", "\n");
+            str = str.Replace("\\\r\n", "\n");
+            str = str.Replace("\t", "    ");
+            str = str.Replace("\\t", "    ");
+            return str;
         }
 
         private static InjectCodeInfo ParseInjectCode(ref ParsingContext context)
@@ -1450,11 +1583,7 @@ namespace Flax.Build.Bindings
             context.Tokenizer.ExpectToken(TokenType.LeftParent);
             var desc = new InjectCodeInfo();
             context.Tokenizer.SkipUntil(TokenType.Comma, out desc.Lang);
-            desc.Code = context.Tokenizer.ExpectToken(TokenType.String).Value.Replace("\\\"", "\"");
-            desc.Code = desc.Code.Substring(1, desc.Code.Length - 2);
-            desc.Code = desc.Code.Replace("\\\n", "\n");
-            desc.Code = desc.Code.Replace("\\\r\n", "\n");
-            desc.Code = desc.Code.Replace("\t", "    ");
+            desc.Code = ParseString(ref context);
             context.Tokenizer.ExpectToken(TokenType.RightParent);
             return desc;
         }
@@ -1471,16 +1600,30 @@ namespace Flax.Build.Bindings
             // Read parameters from the tag
             var tagParams = ParseTagParameters(ref context);
 
-            // Read 'typedef' keyword
+            // Read 'typedef' or 'using' keyword
             var token = context.Tokenizer.NextToken();
-            if (token.Value != "typedef")
-                throw new Exception($"Invalid {ApiTokens.Typedef} usage (expected 'typedef' keyword but got '{token.Value} {context.Tokenizer.NextToken().Value}').");
+            var isUsing = token.Value == "using";
+            if (token.Value != "typedef" && !isUsing)
+                throw new ParseException(ref context, $"Invalid {ApiTokens.Typedef} usage (expected 'typedef' or 'using' keyword but got '{token.Value} {context.Tokenizer.NextToken().Value}').");
 
-            // Read type definition
-            desc.Type = ParseType(ref context);
+            if (isUsing)
+            {
+                // Read name
+                desc.Name = ParseName(ref context);
 
-            // Read name
-            desc.Name = ParseName(ref context);
+                context.Tokenizer.ExpectToken(TokenType.Equal);
+
+                // Read type definition
+                desc.Type = ParseType(ref context);
+            }
+            else
+            {
+                // Read type definition
+                desc.Type = ParseType(ref context);
+
+                // Read name
+                desc.Name = ParseName(ref context);
+            }
 
             // Read ';'
             context.Tokenizer.ExpectToken(TokenType.SemiColon);
@@ -1513,7 +1656,7 @@ namespace Flax.Build.Bindings
                     ParseTypeTag?.Invoke(ref valid, tag, desc);
                     if (valid)
                         break;
-                    Log.Warning($"Unknown or not supported tag parameter {tag} used on {desc.Name} at line {context.Tokenizer.CurrentLine}");
+                    Log.Warning(GetParseErrorLocation(ref context, $"Unknown or not supported tag parameter '{tag}' used on '{desc.Name}'"));
                     break;
                 }
             }

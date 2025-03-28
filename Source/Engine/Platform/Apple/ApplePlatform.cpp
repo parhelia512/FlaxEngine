@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if PLATFORM_MAC || PLATFORM_IOS
 
@@ -132,11 +132,6 @@ bool ApplePlatform::Is64BitPlatform()
 CPUInfo ApplePlatform::GetCPUInfo()
 {
     return Cpu;
-}
-
-int32 ApplePlatform::GetCacheLineSize()
-{
-    return Cpu.CacheLineSize;
 }
 
 MemoryStats ApplePlatform::GetMemoryStats()

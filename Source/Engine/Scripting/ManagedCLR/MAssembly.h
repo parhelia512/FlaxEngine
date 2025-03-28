@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -14,6 +14,7 @@
 /// </summary>
 class FLAXENGINE_API MAssembly
 {
+    friend MCore;
     friend MDomain;
     friend Scripting;
 
@@ -219,7 +220,7 @@ private:
     bool LoadImage(const String& assemblyPath, const StringView& nativePath);
     bool UnloadImage(bool isReloading);
     void OnLoading();
-    void OnLoaded(const struct DateTime& startTime);
+    void OnLoaded(struct Stopwatch& stopwatch);
     void OnLoadFailed();
     bool ResolveMissingFile(String& assemblyPath) const;
 };

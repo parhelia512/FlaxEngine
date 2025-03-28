@@ -1,7 +1,8 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "CommandLine.h"
 #include "Engine/Core/Collections/Array.h"
+#include "Engine/Core/Utilities.h"
 #include <iostream>
 
 CommandLine::OptionsData CommandLine::Options;
@@ -81,7 +82,7 @@ bool CommandLine::Parse(const Char* cmdLine)
 		if (pos) \
 		{ \
 			len = ARRAY_COUNT(text) - 1; \
-			Platform::MemoryCopy(pos, pos + len, (end - pos - len) * 2); \
+			Utilities::UnsafeMemoryCopy(pos, pos + len, (end - pos - len) * 2); \
 			*(end - len) = 0; \
 			end -= len; \
 			Options.field = true; \
@@ -98,7 +99,7 @@ bool CommandLine::Parse(const Char* cmdLine)
 			} \
 			Options.field = String(argStart, static_cast<int32>(argEnd - argStart)); \
 			len = static_cast<int32>((argEnd - pos) + 1); \
-			Platform::MemoryCopy(pos, pos + len, (end - pos - len) * 2); \
+			Utilities::UnsafeMemoryCopy(pos, pos + len, (end - pos - len) * 2); \
 			*(end - len) = 0; \
 			end -= len; \
 		}
@@ -114,7 +115,7 @@ bool CommandLine::Parse(const Char* cmdLine)
             { \
 			    Options.field = String(argStart, static_cast<int32>(argEnd - argStart)); \
 			    len = static_cast<int32>((argEnd - pos) + 1); \
-			    Platform::MemoryCopy(pos, pos + len, (end - pos - len) * 2); \
+			    Utilities::UnsafeMemoryCopy(pos, pos + len, (end - pos - len) * 2); \
 			    *(end - len) = 0; \
 			    end -= len; \
 			} \
@@ -144,9 +145,7 @@ bool CommandLine::Parse(const Char* cmdLine)
     PARSE_BOOL_SWITCH("-monolog ", MonoLog);
     PARSE_BOOL_SWITCH("-mute ", Mute);
     PARSE_BOOL_SWITCH("-lowdpi ", LowDPI);
-
 #if USE_EDITOR
-
     PARSE_BOOL_SWITCH("-clearcache ", ClearCache);
     PARSE_BOOL_SWITCH("-clearcooker ", ClearCookerCache);
     PARSE_ARG_SWITCH("-project ", Project);
@@ -155,8 +154,11 @@ bool CommandLine::Parse(const Char* cmdLine)
     PARSE_ARG_SWITCH("-build ", Build);
     PARSE_BOOL_SWITCH("-skipcompile ", SkipCompile);
     PARSE_BOOL_SWITCH("-shaderdebug ", ShaderDebug);
+    PARSE_BOOL_SWITCH("-exit ", Exit);
     PARSE_ARG_OPT_SWITCH("-play ", Play);
-
+#endif
+#if USE_EDITOR || !BUILD_RELEASE
+    PARSE_BOOL_SWITCH("-shaderprofile ", ShaderProfile);
 #endif
 
     return false;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "Tags.h"
 #include "Engine/Core/Types/String.h"
@@ -53,6 +53,11 @@ Tag Tags::Get(const StringView& tagName)
 #endif
     }
     return tag;
+}
+
+Tag Tags::Find(const StringView& tagName)
+{
+    return Tag(List.Find(tagName) + 1);
 }
 
 Array<Tag> Tags::GetSubTags(Tag parentTag)

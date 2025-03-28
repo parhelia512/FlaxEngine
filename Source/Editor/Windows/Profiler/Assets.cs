@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -38,28 +38,39 @@ namespace FlaxEditor.Windows.Profiler
         : base("Assets")
         {
             // Layout
-            var panel = new Panel(ScrollBars.Vertical)
+            var mainPanel = new Panel(ScrollBars.None)
             {
                 AnchorPreset = AnchorPresets.StretchAll,
                 Offsets = Margin.Zero,
                 Parent = this,
             };
-            var layout = new VerticalPanel
-            {
-                AnchorPreset = AnchorPresets.HorizontalStretchTop,
-                Offsets = Margin.Zero,
-                IsScrollable = true,
-                Parent = panel,
-            };
-
+            
             // Chart
             _memoryUsageChart = new SingleChart
             {
                 Title = "Assets Memory Usage (CPU)",
-                FormatSample = v => Utilities.Utils.FormatBytesCount((int)v),
-                Parent = layout,
+                AnchorPreset = AnchorPresets.HorizontalStretchTop,
+                Offsets = Margin.Zero,
+                Height = SingleChart.DefaultHeight,
+                FormatSample = v => Utilities.Utils.FormatBytesCount((ulong)v),
+                Parent = mainPanel,
             };
             _memoryUsageChart.SelectedSampleChanged += OnSelectedSampleChanged;
+
+            var panel = new Panel(ScrollBars.Vertical)
+            {
+                AnchorPreset = AnchorPresets.StretchAll,
+                Offsets = new Margin(0, 0, _memoryUsageChart.Height + 2, 0),
+                Parent = mainPanel,
+            };
+            var layout = new VerticalPanel
+            {
+                AnchorPreset = AnchorPresets.HorizontalStretchTop,
+                Offsets = Margin.Zero,
+                Pivot = Float2.Zero,
+                IsScrollable = true,
+                Parent = panel,
+            };
 
             // Table
             var style = Style.Current;

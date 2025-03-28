@@ -1,8 +1,9 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "BinaryModule.h"
 #include "ScriptingObject.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Core/Utilities.h"
 #include "Engine/Threading/Threading.h"
 #include "Engine/Profiler/ProfilerCPU.h"
 #include "ManagedCLR/MAssembly.h"
@@ -436,6 +437,7 @@ void ScriptingType::SetupScriptVTable(ScriptingTypeHandle baseTypeHandle)
     }
 }
 
+NO_SANITIZE_ADDRESS
 void ScriptingType::SetupScriptObjectVTable(void* object, ScriptingTypeHandle baseTypeHandle, int32 wrapperIndex)
 {
     // Analyze vtable size
@@ -475,7 +477,7 @@ void ScriptingType::SetupScriptObjectVTable(void* object, ScriptingTypeHandle ba
 
     // Duplicate vtable
     Script.VTable = (void**)((byte*)Platform::Allocate(totalSize, 16) + prefixSize);
-    Platform::MemoryCopy((byte*)Script.VTable - prefixSize, (byte*)vtable - prefixSize, prefixSize + size);
+    Utilities::UnsafeMemoryCopy((byte*)Script.VTable - prefixSize, (byte*)vtable - prefixSize, prefixSize + size);
 
     // Override vtable entries
     if (interfacesCount)
@@ -508,7 +510,7 @@ void ScriptingType::SetupScriptObjectVTable(void* object, ScriptingTypeHandle ba
                     const int32 interfaceSize = interfaceCount * sizeof(void*);
 
                     // Duplicate interface vtable
-                    Platform::MemoryCopy((byte*)Script.VTable + interfaceOffset, (byte*)vtableInterface - prefixSize, prefixSize + interfaceSize);
+                    Utilities::UnsafeMemoryCopy((byte*)Script.VTable + interfaceOffset, (byte*)vtableInterface - prefixSize, prefixSize + interfaceSize);
 
                     // Override interface vtable entries
                     const auto scriptOffset = interfaces->ScriptVTableOffset;
@@ -533,7 +535,12 @@ void ScriptingType::HackObjectVTable(void* object, ScriptingTypeHandle baseTypeH
     if (!Script.VTable)
     {
         // Ensure to have valid Script VTable hacked
-        SetupScriptObjectVTable(object, baseTypeHandle, wrapperIndex);
+        BinaryModule::Locker.Lock();
+        if (!Script.VTable)
+        {
+            SetupScriptObjectVTable(object, baseTypeHandle, wrapperIndex);
+        }
+        BinaryModule::Locker.Unlock();
     }
 
     // Override object vtable with hacked one that has calls to overriden scripting functions
@@ -758,6 +765,11 @@ ScriptingObject* ManagedBinaryModule::ManagedObjectSpawn(const ScriptingObjectSp
     // Create native object
     ScriptingTypeHandle managedTypeHandle = params.Type;
     const ScriptingType* managedTypePtr = &managedTypeHandle.GetType();
+    if (managedTypePtr->ManagedClass && managedTypePtr->ManagedClass->IsAbstract())
+    {
+        LOG(Error, "Failed to spawn abstract type '{}'", managedTypePtr->ToString());
+        return nullptr;
+    }
     while (managedTypePtr->Script.Spawn != &ManagedObjectSpawn)
     {
         managedTypeHandle = managedTypePtr->GetBaseType();
@@ -783,6 +795,13 @@ ScriptingObject* ManagedBinaryModule::ManagedObjectSpawn(const ScriptingObjectSp
 
     // Mark as managed type
     object->Flags |= ObjectFlags::IsManagedType;
+
+    // Initialize managed instance (ScriptingObject ctor copies managed object handle)
+    if (!params.Managed)
+    {
+        // Invoke managed ctor (to match C++ logic)
+        object->CreateManaged();
+    }
 
     return object;
 }
@@ -834,12 +853,12 @@ namespace
 
 MMethod* ManagedBinaryModule::FindMethod(MClass* mclass, const ScriptingTypeMethodSignature& signature)
 {
+#if USE_CSHARP
     if (!mclass)
         return nullptr;
     const auto& methods = mclass->GetMethods();
     for (MMethod* method : methods)
     {
-#if USE_CSHARP
         if (method->IsStatic() != signature.IsStatic)
             continue;
         if (method->GetName() != signature.Name)
@@ -860,8 +879,8 @@ MMethod* ManagedBinaryModule::FindMethod(MClass* mclass, const ScriptingTypeMeth
         }
         if (isValid && VariantTypeEquals(signature.ReturnType, method->GetReturnType()))
             return method;
-#endif
     }
+#endif
     return nullptr;
 }
 
@@ -1035,18 +1054,11 @@ void ManagedBinaryModule::InitType(MClass* mclass)
         baseType.Module->TypeNameToTypeIndex.TryGet(genericClassName, *(int32*)&baseType.TypeIndex);
     }
 
-    if (!baseType)
-    {
-        LOG(Error, "Missing base class for managed class {0} from assembly {1}.", String(typeName), Assembly->ToString());
-        return;
-    }
-
-    if (baseType.TypeIndex == -1)
+    if (baseType.TypeIndex == -1 || baseType.Module == nullptr)
     {
         if (baseType.Module)
             LOG(Error, "Missing base class for managed class {0} from assembly {1}.", String(baseClass->GetFullName()), baseType.Module->GetName().ToString());
         else
-            // Not sure this can happen but never hurts to account for it
             LOG(Error, "Missing base class for managed class {0} from unknown assembly.", String(baseClass->GetFullName()));
         return;
     }
@@ -1259,6 +1271,7 @@ bool ManagedBinaryModule::InvokeMethod(void* method, const Variant& instance, Sp
 
     // Marshal parameters
     void** params = (void**)alloca(parametersCount * sizeof(void*));
+    void** outParams = nullptr;
     bool failed = false;
     bool hasOutParams = false;
     for (int32 paramIdx = 0; paramIdx < parametersCount; paramIdx++)
@@ -1274,6 +1287,14 @@ bool ManagedBinaryModule::InvokeMethod(void* method, const Variant& instance, Sp
         {
             LOG(Error, "Failed to marshal parameter {5}:{4} of method '{0}.{1}' (args count: {2}), value type: {6}, value: {3}", String(mMethod->GetParentClass()->GetFullName()), String(mMethod->GetName()), parametersCount, paramValue, MCore::Type::ToString(paramType), paramIdx, paramValue.Type);
             return true;
+        }
+        if (isOut && MCore::Type::IsReference(paramType) && MCore::Type::GetType(paramType) == MTypes::Object)
+        {
+            // Object passed as out param so pass pointer to the value storage for proper marshalling
+            if (!outParams)
+                outParams = (void**)alloca(parametersCount * sizeof(void*));
+            outParams[paramIdx] = params[paramIdx];
+            params[paramIdx] = &outParams[paramIdx];
         }
     }
 
@@ -1337,6 +1358,13 @@ bool ManagedBinaryModule::InvokeMethod(void* method, const Variant& instance, Sp
                         MObject* boxed = MCore::Object::Box(param, valueType.ManagedClass);
                         valueType.Struct.Unbox(paramValue.AsBlob.Data, boxed);
                     }
+                    break;
+                }
+                default:
+                {
+                    MType* paramType = mMethod->GetParameterType(paramIdx);
+                    if (MCore::Type::IsReference(paramType) && MCore::Type::GetType(paramType) == MTypes::Object)
+                        paramValue = MUtils::UnboxVariant((MObject*)outParams[paramIdx]);
                     break;
                 }
                 }
@@ -1510,7 +1538,7 @@ bool ManagedBinaryModule::SetFieldValue(void* field, const Variant& instance, Va
     if ((uintptr)field & ManagedBinaryModuleFieldIsPropertyBit)
     {
         const auto mProperty = (MProperty*)((uintptr)field & ~ManagedBinaryModuleFieldIsPropertyBit);
-        mProperty->SetValue(instanceObject, MUtils::BoxVariant(value), nullptr);
+        mProperty->SetValue(instanceObject, MUtils::VariantToManagedArgPtr(value, mProperty->GetType(), failed), nullptr);
     }
     else
     {

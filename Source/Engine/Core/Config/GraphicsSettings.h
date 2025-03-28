@@ -1,10 +1,12 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
 #include "Engine/Core/Config/Settings.h"
 #include "Engine/Graphics/Enums.h"
 #include "Engine/Graphics/PostProcessSettings.h"
+
+class FontAsset;
 
 /// <summary>
 /// Graphics rendering settings.
@@ -13,6 +15,7 @@ API_CLASS(sealed, Namespace="FlaxEditor.Content.Settings", NoConstructor) class 
 {
     API_AUTO_SERIALIZATION();
     DECLARE_SCRIPTING_TYPE_MINIMAL(GraphicsSettings);
+
 public:
     /// <summary>
     /// Enables rendering synchronization with the refresh rate of the display device to avoid "tearing" artifacts.
@@ -58,9 +61,10 @@ public:
 
     /// <summary>
     /// Enables cascades splits blending for directional light shadows.
+    /// [Deprecated in v1.9]
     /// </summary>
     API_FIELD(Attributes="EditorOrder(1320), DefaultValue(false), EditorDisplay(\"Quality\", \"Allow CSM Blending\")")
-    bool AllowCSMBlending = false;
+    DEPRECATED() bool AllowCSMBlending = false;
 
     /// <summary>
     /// Default probes cubemap resolution (use for Environment Probes, can be overriden per-actor).
@@ -79,6 +83,12 @@ public:
     /// </summary>
     API_FIELD(Attributes="EditorOrder(2000), EditorDisplay(\"Global SDF\")")
     bool EnableGlobalSDF = false;
+
+    /// <summary>
+    /// Draw distance of the Global SDF. Actual value can be large when using DDGI.
+    /// </summary>
+    API_FIELD(Attributes="EditorOrder(2001), EditorDisplay(\"Global SDF\"), Limit(1000), ValueCategory(Utils.ValueCategory.Distance)")
+    float GlobalSDFDistance = 15000.0f;
 
     /// <summary>
     /// The Global SDF quality. Controls the volume texture resolution and amount of cascades to use.
@@ -107,6 +117,12 @@ public:
     float GIProbesSpacing = 100;
 
     /// <summary>
+    /// Enables cascades splits blending for Global Illumination.
+    /// </summary>
+    API_FIELD(Attributes="EditorOrder(2125), DefaultValue(false), EditorDisplay(\"Global Illumination\", \"GI Cascades Blending\")")
+    bool GICascadesBlending = false;
+
+    /// <summary>
     /// The Global Surface Atlas resolution. Adjust it if atlas `flickers` due to overflow (eg. to 4096).
     /// </summary>
     API_FIELD(Attributes="EditorOrder(2130), Limit(256, 8192), EditorDisplay(\"Global Illumination\")")
@@ -117,6 +133,12 @@ public:
     /// </summary>
     API_FIELD(Attributes="EditorOrder(10000), EditorDisplay(\"Post Process Settings\", EditorDisplayAttribute.InlineStyle)")
     PostProcessSettings PostProcessSettings;
+
+    /// <summary>
+    /// The list of fallback fonts used for text rendering. Ignored if empty.
+    /// </summary>
+    API_FIELD(Attributes="EditorOrder(5000), EditorDisplay(\"Text\")")
+    Array<AssetReference<FontAsset>> FallbackFonts;
 
 private:
     /// <summary>

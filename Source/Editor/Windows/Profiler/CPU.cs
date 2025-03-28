@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -20,9 +20,7 @@ namespace FlaxEngine
                 get
                 {
                     fixed (short* name = Name0)
-                    {
                         return new string((char*)name);
-                    }
                 }
             }
 
@@ -31,9 +29,7 @@ namespace FlaxEngine
                 fixed (short* name = Name0)
                 {
                     fixed (char* p = prefix)
-                    {
                         return Utils.MemoryCompare(new IntPtr(name), new IntPtr(p), (ulong)(prefix.Length * 2)) == 0;
-                    }
                 }
             }
         }
@@ -61,29 +57,41 @@ namespace FlaxEditor.Windows.Profiler
         : base("CPU")
         {
             // Layout
-            var panel = new Panel(ScrollBars.Vertical)
+            var mainPanel = new Panel(ScrollBars.None)
             {
                 AnchorPreset = AnchorPresets.StretchAll,
                 Offsets = Margin.Zero,
                 Parent = this,
             };
-            var layout = new VerticalPanel
-            {
-                AnchorPreset = AnchorPresets.HorizontalStretchTop,
-                Offsets = Margin.Zero,
-                IsScrollable = true,
-                Parent = panel,
-            };
-
+            
             // Chart
             _mainChart = new SingleChart
             {
                 Title = "Update",
+                AnchorPreset = AnchorPresets.HorizontalStretchTop,
+                Offsets = Margin.Zero,
+                Height = SingleChart.DefaultHeight,
                 FormatSample = v => (Mathf.RoundToInt(v * 10.0f) / 10.0f) + " ms",
-                Parent = layout,
+                Parent = mainPanel,
             };
             _mainChart.SelectedSampleChanged += OnSelectedSampleChanged;
-
+            
+            var panel = new Panel(ScrollBars.Vertical)
+            {
+                AnchorPreset = AnchorPresets.StretchAll,
+                Offsets = new Margin(0, 0, _mainChart.Height + 2, 0),
+                Parent = mainPanel,
+            };
+            //panel.Y = _mainChart.Height + 2;
+            var layout = new VerticalPanel
+            {
+                AnchorPreset = AnchorPresets.HorizontalStretchTop,
+                Offsets = Margin.Zero,
+                Pivot = Float2.Zero,
+                IsScrollable = true,
+                Parent = panel,
+            };
+            
             // Timeline
             _timeline = new Timeline
             {
@@ -168,7 +176,7 @@ namespace FlaxEditor.Windows.Profiler
 
         private string FormatCellBytes(object x)
         {
-            return Utilities.Utils.FormatBytesCount((int)x);
+            return Utilities.Utils.FormatBytesCount(Convert.ToUInt64(x));
         }
 
         /// <inheritdoc />

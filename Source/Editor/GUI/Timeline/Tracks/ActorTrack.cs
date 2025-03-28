@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.IO;
@@ -204,7 +204,7 @@ namespace FlaxEditor.GUI.Timeline.Tracks
                     b.TooltipText = Utilities.Utils.GetTooltip(actorNode.Actor);
                 }
             }
-            menu.AddButton("Select...", OnClickedSelect).TooltipText = "Opens actor picker dialog to select the target actor for this track";
+            menu.AddButton("Retarget...", OnClickedSelect).TooltipText = "Opens actor picker dialog to select the target actor for this track";
         }
 
         /// <summary>
@@ -264,7 +264,7 @@ namespace FlaxEditor.GUI.Timeline.Tracks
 
         private void OnClickedSelect()
         {
-            ActorSearchPopup.Show(this, PointFromScreen(FlaxEngine.Input.MouseScreenPosition), IsActorValid, SetActor);
+            ActorSearchPopup.Show(this, PointFromScreen(FlaxEngine.Input.MouseScreenPosition), IsActorValid, SetActor, null);
         }
 
         private void OnClickedSelectActor(Image image, MouseButton button)

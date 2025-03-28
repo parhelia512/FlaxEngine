@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if PLATFORM_LINUX
 
@@ -1766,11 +1766,6 @@ CPUInfo LinuxPlatform::GetCPUInfo()
     return UnixCpu;
 }
 
-int32 LinuxPlatform::GetCacheLineSize()
-{
-    return UnixCpu.CacheLineSize;
-}
-
 MemoryStats LinuxPlatform::GetMemoryStats()
 {
     // Get memory usage
@@ -2252,6 +2247,9 @@ bool LinuxPlatform::Init()
 			}
 		}
 	}
+
+	//Patch in numpad enter to normal enter, just like on windows.
+	KeyCodeMap[104] = KeyboardKeys::Return;
 
     Input::Mouse = Impl::Mouse = New<LinuxMouse>();
     Input::Keyboard = Impl::Keyboard = New<LinuxKeyboard>();
@@ -2920,7 +2918,7 @@ int32 LinuxPlatform::CreateProcess(CreateProcessSettings& settings)
         LOG(Info, "Working directory: {0}", settings.WorkingDirectory);
     }
     const bool captureStdOut = settings.LogOutput || settings.SaveOutput;
-    const String cmdLine = settings.FileName + TEXT(" ") + settings.Arguments;
+    const String cmdLine = String::Format(TEXT("\"{0}\" {1}"), settings.FileName, settings.Arguments);
 
 	int fildes[2];
 	int32 returnCode = 0;

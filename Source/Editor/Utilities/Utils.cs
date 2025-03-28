@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #if USE_LARGE_WORLDS
 using Real = System.Double;
@@ -11,7 +11,6 @@ using System.Globalization;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -20,6 +19,7 @@ using FlaxEditor.GUI.Input;
 using FlaxEditor.GUI.Tree;
 using FlaxEditor.SceneGraph;
 using FlaxEngine;
+using FlaxEngine.Json;
 using FlaxEngine.GUI;
 using FlaxEngine.Utilities;
 using FlaxEditor.Windows;
@@ -146,19 +146,14 @@ namespace FlaxEditor.Utilities
 
         /// <summary>
         /// Formats the amount of bytes to get a human-readable data size in bytes with abbreviation. Eg. 32 kB
+        /// [Deprecated in v1.9]
         /// </summary>
         /// <param name="bytes">The bytes.</param>
         /// <returns>The formatted amount of bytes.</returns>
+        [Obsolete("Use FormatBytesCount with ulong instead")]
         public static string FormatBytesCount(int bytes)
         {
-            int order = 0;
-            while (bytes >= 1024 && order < MemorySizePostfixes.Length - 1)
-            {
-                order++;
-                bytes /= 1024;
-            }
-
-            return string.Format("{0:0.##} {1}", bytes, MemorySizePostfixes[order]);
+            return FormatBytesCount((ulong)bytes);
         }
 
         /// <summary>
@@ -169,12 +164,15 @@ namespace FlaxEditor.Utilities
         public static string FormatBytesCount(ulong bytes)
         {
             int order = 0;
+            ulong bytesPrev = bytes;
             while (bytes >= 1024 && order < MemorySizePostfixes.Length - 1)
             {
+                bytesPrev = bytes;
                 order++;
                 bytes /= 1024;
             }
-
+            if (order >= 3) // GB or higher use up to 2 decimal places for more precision
+                return string.Format("{0:0.##} {1}", FlaxEngine.Utils.RoundTo2DecimalPlaces(bytesPrev / 1024.0f), MemorySizePostfixes[order]);
             return string.Format("{0:0.##} {1}", bytes, MemorySizePostfixes[order]);
         }
 
@@ -204,6 +202,27 @@ namespace FlaxEditor.Utilities
         }
 
         /// <summary>
+        /// Clones the value. handles non-value types (such as arrays) that need deep value cloning.
+        /// </summary>
+        /// <param name="value">The source value to clone.</param>
+        /// <returns>The duplicated value.</returns>
+        internal static object CloneValue(object value)
+        {
+            // For object references just clone it
+            if (value is FlaxEngine.Object)
+                return value;
+
+            // For objects (eg. arrays) we need to clone them to prevent editing default/reference value within editor
+            if (value != null && (!value.GetType().IsValueType || !value.GetType().IsClass))
+            {
+                var json = JsonSerializer.Serialize(value);
+                value = JsonSerializer.Deserialize(json, value.GetType());
+            }
+
+            return value;
+        }
+
+        /// <summary>
         /// The colors for the keyframes used by the curve editor.
         /// </summary>
         internal static readonly Color[] CurveKeyframesColors =
@@ -217,15 +236,90 @@ namespace FlaxEditor.Utilities
         /// <summary>
         /// The time/value axes tick steps for editors with timeline.
         /// </summary>
-        internal static readonly float[] CurveTickSteps =
+        internal static readonly double[] CurveTickSteps =
         {
-            0.0000001f, 0.0000005f, 0.000001f, 0.000005f, 0.00001f,
-            0.00005f, 0.0001f, 0.0005f, 0.001f, 0.005f,
-            0.01f, 0.05f, 0.1f, 0.5f, 1,
+            0.0000001, 0.0000005, 0.000001, 0.000005, 0.00001,
+            0.00005, 0.0001, 0.0005, 0.001, 0.005,
+            0.01, 0.05, 0.1, 0.5, 1,
             5, 10, 50, 100, 500,
             1000, 5000, 10000, 50000, 100000,
             500000, 1000000, 5000000, 10000000, 100000000
         };
+
+        internal delegate void DrawCurveTick(decimal tick, double step, float strength);
+
+        internal static Int2 DrawCurveTicks(DrawCurveTick drawTick, double[] tickSteps, ref float[] tickStrengths, float min, float max, float pixelRange, float minDistanceBetweenTicks = 20, float maxDistanceBetweenTicks = 60)
+        {
+            if (pixelRange <= Mathf.Epsilon || maxDistanceBetweenTicks <= minDistanceBetweenTicks)
+                return Int2.Zero;
+            if (tickStrengths == null || tickStrengths.Length != tickSteps.Length)
+                tickStrengths = new float[tickSteps.Length];
+
+            // Find the strength for each modulo number tick marker
+            var pixelsInRange = pixelRange / (max - min);
+            var smallestTick = 0;
+            var biggestTick = tickSteps.Length - 1;
+            for (int i = tickSteps.Length - 1; i >= 0; i--)
+            {
+                // Calculate how far apart these modulo tick steps are spaced
+                var tickSpacing = tickSteps[i] * pixelsInRange;
+
+                // Calculate the strength of the tick markers based on the spacing
+                tickStrengths[i] = (float)Mathd.Saturate((tickSpacing - minDistanceBetweenTicks) / (maxDistanceBetweenTicks - minDistanceBetweenTicks));
+
+                // Beyond threshold the ticks don't get any bigger or fatter
+                if (tickStrengths[i] >= 1)
+                    biggestTick = i;
+
+                // Do not show small tick markers
+                if (tickSpacing <= minDistanceBetweenTicks)
+                {
+                    smallestTick = i;
+                    break;
+                }
+            }
+            var tickLevels = biggestTick - smallestTick + 1;
+
+            // Draw all tick levels
+            for (int level = 0; level < tickLevels; level++)
+            {
+                var strength = tickStrengths[smallestTick + level];
+                if (strength <= Mathf.Epsilon)
+                    continue;
+
+                // Draw all ticks
+                int l = Mathf.Clamp(smallestTick + level, 0, tickSteps.Length - 2);
+                var lStep = tickSteps[l];
+                var lNextStep = tickSteps[l + 1];
+                var startTick = Mathd.FloorToInt(min / lStep);
+                var endTick = Mathd.CeilToInt(max / lStep);
+                for (var i = startTick; i <= endTick; i++)
+                {
+                    if (l < biggestTick && (i % Mathd.RoundToInt(lNextStep / lStep) == 0))
+                        continue;
+                    var tick = (decimal)lStep * i;
+                    drawTick(tick, lStep, strength);
+                }
+            }
+
+            return new Int2(smallestTick, biggestTick);
+        }
+
+        internal static float GetCurveGridSnap(double[] tickSteps, ref float[] tickStrengths, float min, float max, float pixelRange, float minDistanceBetweenTicks = 20, float maxDistanceBetweenTicks = 60)
+        {
+            double gridStep = 0; // No grid
+            float gridWeight = 0.0f;
+            DrawCurveTicks((decimal tick, double step, float strength) =>
+            {
+                // Find the smallest grid step that has meaningful strength (it's the most visible to the user)
+                if (strength > gridWeight && (step < gridStep || gridStep <= 0.0) && strength > 0.5f)
+                {
+                    gridStep = Math.Abs(step);
+                    gridWeight = strength;
+                }
+            }, tickSteps, ref tickStrengths, min, max, pixelRange, minDistanceBetweenTicks, maxDistanceBetweenTicks);
+            return (float)gridStep;
+        }
 
         /// <summary>
         /// Determines whether the specified path string contains any invalid character.
@@ -303,6 +397,40 @@ namespace FlaxEditor.Utilities
         {
             if (File.Exists(file))
                 File.Delete(file);
+        }
+
+        /// <summary>
+        /// Creates an Import path ui that show the asset import path and adds a button to show the folder in the file system.
+        /// </summary>
+        /// <param name="parentLayout">The parent layout container.</param>
+        /// <param name="assetItem">The asset item to get the import path of.</param>
+        public static void CreateImportPathUI(CustomEditors.LayoutElementsContainer parentLayout, Content.BinaryAssetItem assetItem)
+        {
+            assetItem.GetImportPath(out var path);
+            CreateImportPathUI(parentLayout, path);
+        }
+
+        /// <summary>
+        /// Creates an Import path ui that show the import path and adds a button to show the folder in the file system.
+        /// </summary>
+        /// <param name="parentLayout">The parent layout container.</param>
+        /// <param name="path">The import path.</param>
+        /// <param name="useInitialSpacing">Whether to use an initial layout space of 5 for separation.</param>
+        public static void CreateImportPathUI(CustomEditors.LayoutElementsContainer parentLayout, string path, bool useInitialSpacing = true)
+        {
+            if (!string.IsNullOrEmpty(path))
+            {
+                if (useInitialSpacing)
+                    parentLayout.Space(5);
+                parentLayout.Label("Import Path:").Label.TooltipText = "Source asset path (can be relative or absolute to the project)";
+                var textBox = parentLayout.TextBox().TextBox;
+                textBox.TooltipText = "Path is not editable here.";
+                textBox.IsReadOnly = true;
+                textBox.Text = path;
+                parentLayout.Space(2);
+                var button = parentLayout.Button(Constants.ShowInExplorer).Button;
+                button.Clicked += () => FileSystem.ShowFileExplorer(Path.GetDirectoryName(path));
+            }
         }
 
         /// <summary>
@@ -1083,6 +1211,7 @@ namespace FlaxEditor.Utilities
             {
                 Parent = panel1,
                 AnchorPreset = AnchorPresets.HorizontalStretchTop,
+                Pivot = Float2.Zero,
                 IsScrollable = true,
             };
             tree = new Tree(false)
@@ -1171,6 +1300,71 @@ namespace FlaxEditor.Utilities
             return StringUtils.GetPathWithoutExtension(path);
         }
 
+        private static string InternalFormat(double value, string format, FlaxEngine.Utils.ValueCategory category)
+        {
+            switch (category)
+            {
+            case FlaxEngine.Utils.ValueCategory.Distance:
+                if (!Units.AutomaticUnitsFormatting)
+                    return (value / Units.Meters2Units).ToString(format, CultureInfo.InvariantCulture) + Units.Unit("m");
+                var absValue = Mathf.Abs(value);
+                // in case a unit != cm this would be (value / Meters2Units * 100)
+                if (absValue < Units.Meters2Units)
+                    return value.ToString(format, CultureInfo.InvariantCulture) + Units.Unit("cm");
+                if (absValue < Units.Meters2Units * 1000)
+                    return (value / Units.Meters2Units).ToString(format, CultureInfo.InvariantCulture) + Units.Unit("m");
+                return (value / 1000 / Units.Meters2Units).ToString(format, CultureInfo.InvariantCulture) + Units.Unit("km");
+            case FlaxEngine.Utils.ValueCategory.Angle: return value.ToString(format, CultureInfo.InvariantCulture) + "°";
+            case FlaxEngine.Utils.ValueCategory.Time: return value.ToString(format, CultureInfo.InvariantCulture) + Units.Unit("s");
+            // some fonts have a symbol for that: "\u33A7"
+            case FlaxEngine.Utils.ValueCategory.Speed: return (value / Units.Meters2Units).ToString(format, CultureInfo.InvariantCulture) + Units.Unit("m/s");
+            case FlaxEngine.Utils.ValueCategory.Acceleration: return (value / Units.Meters2Units).ToString(format, CultureInfo.InvariantCulture) + Units.Unit("m/s²");
+            case FlaxEngine.Utils.ValueCategory.Area: return (value / Units.Meters2Units / Units.Meters2Units).ToString(format, CultureInfo.InvariantCulture) + Units.Unit("m²");
+            case FlaxEngine.Utils.ValueCategory.Volume: return (value / Units.Meters2Units / Units.Meters2Units / Units.Meters2Units).ToString(format, CultureInfo.InvariantCulture) + Units.Unit("m³");
+            case FlaxEngine.Utils.ValueCategory.Mass: return value.ToString(format, CultureInfo.InvariantCulture) + Units.Unit("kg");
+            case FlaxEngine.Utils.ValueCategory.Force: return (value / Units.Meters2Units).ToString(format, CultureInfo.InvariantCulture) + Units.Unit("N");
+            case FlaxEngine.Utils.ValueCategory.Torque: return (value / Units.Meters2Units / Units.Meters2Units).ToString(format, CultureInfo.InvariantCulture) + Units.Unit("Nm");
+            case FlaxEngine.Utils.ValueCategory.None:
+            default: return FormatFloat(value);
+            }
+        }
+
+        /// <summary>
+        /// Format a float value either as-is, with a distance unit or with a degree sign.
+        /// </summary>
+        /// <param name="value">The value to format.</param>
+        /// <param name="category">The value type: none means just a number, distance will format in cm/m/km, angle with an appended degree sign.</param>
+        /// <returns>The formatted string.</returns>
+        public static string FormatFloat(float value, FlaxEngine.Utils.ValueCategory category)
+        {
+            if (float.IsPositiveInfinity(value) || value == float.MaxValue)
+                return "Infinity";
+            if (float.IsNegativeInfinity(value) || value == float.MinValue)
+                return "-Infinity";
+            if (!Units.UseUnitsFormatting || category == FlaxEngine.Utils.ValueCategory.None)
+                return FormatFloat(value);
+            const string format = "G7";
+            return InternalFormat(value, format, category);
+        }
+
+        /// <summary>
+        /// Format a double value either as-is, with a distance unit or with a degree sign
+        /// </summary>
+        /// <param name="value">The value to format.</param>
+        /// <param name="category">The value type: none means just a number, distance will format in cm/m/km, angle with an appended degree sign.</param>
+        /// <returns>The formatted string.</returns>
+        public static string FormatFloat(double value, FlaxEngine.Utils.ValueCategory category)
+        {
+            if (double.IsPositiveInfinity(value) || value == double.MaxValue)
+                return "Infinity";
+            if (double.IsNegativeInfinity(value) || value == double.MinValue)
+                return "-Infinity";
+            if (!Units.UseUnitsFormatting || category == FlaxEngine.Utils.ValueCategory.None)
+                return FormatFloat(value);
+            const string format = "G15";
+            return InternalFormat(value, format, category);
+        }
+
         /// <summary>
         /// Formats the floating point value (double precision) into the readable text representation.
         /// </summary>
@@ -1182,7 +1376,7 @@ namespace FlaxEditor.Utilities
                 return "Infinity";
             if (float.IsNegativeInfinity(value) || value == float.MinValue)
                 return "-Infinity";
-            string str = value.ToString("r", CultureInfo.InvariantCulture);
+            string str = value.ToString("R", CultureInfo.InvariantCulture);
             return FormatFloat(str, value < 0);
         }
 
@@ -1197,7 +1391,7 @@ namespace FlaxEditor.Utilities
                 return "Infinity";
             if (double.IsNegativeInfinity(value) || value == double.MinValue)
                 return "-Infinity";
-            string str = value.ToString("r", CultureInfo.InvariantCulture);
+            string str = value.ToString("R", CultureInfo.InvariantCulture);
             return FormatFloat(str, value < 0);
         }
 
@@ -1289,7 +1483,9 @@ namespace FlaxEditor.Utilities
             inputActions.Add(options => options.Paste, Editor.Instance.SceneEditing.Paste);
             inputActions.Add(options => options.Duplicate, Editor.Instance.SceneEditing.Duplicate);
             inputActions.Add(options => options.SelectAll, Editor.Instance.SceneEditing.SelectAllScenes);
+            inputActions.Add(options => options.DeselectAll, Editor.Instance.SceneEditing.DeselectAllScenes);
             inputActions.Add(options => options.Delete, Editor.Instance.SceneEditing.Delete);
+            inputActions.Add(options => options.GroupSelectedActors, Editor.Instance.SceneEditing.CreateParentForSelectedActors);
             inputActions.Add(options => options.Search, () => Editor.Instance.Windows.SceneWin.Search());
             inputActions.Add(options => options.MoveActorToViewport, Editor.Instance.UI.MoveActorToViewport);
             inputActions.Add(options => options.AlignActorWithViewport, Editor.Instance.UI.AlignActorWithViewport);
@@ -1326,6 +1522,35 @@ namespace FlaxEditor.Utilities
             inputActions.Add(options => options.OpenScriptsProject, () => Editor.Instance.CodeEditing.OpenSolution());
             inputActions.Add(options => options.GenerateScriptsProject, () => Editor.Instance.ProgressReporting.GenerateScriptsProjectFiles.RunAsync());
             inputActions.Add(options => options.RecompileScripts, ScriptsBuilder.Compile);
+        }
+
+        internal static string ToPathProject(string path)
+        {
+            if (path != null)
+            {
+                // Convert into path relative to the project (cross-platform)
+                var projectFolder = Globals.ProjectFolder;
+                if (path.StartsWith(projectFolder))
+                    path = path.Substring(projectFolder.Length + 1);
+            }
+            return path;
+        }
+
+        internal static string ToPathAbsolute(string path)
+        {
+            if (path != null)
+            {
+                // Convert into global path to if relative to the project
+                path = StringUtils.IsRelative(path) ? Path.Combine(Globals.ProjectFolder, path) : path;
+            }
+            return path;
+        }
+
+        internal static ISceneEditingContext GetSceneContext(this Control c)
+        {
+            while (c != null && !(c is ISceneEditingContext))
+                c = c.Parent;
+            return c as ISceneEditingContext;
         }
     }
 }

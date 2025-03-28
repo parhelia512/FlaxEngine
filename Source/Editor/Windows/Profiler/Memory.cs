@@ -1,6 +1,6 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
-using System;
+using FlaxEngine;
 using FlaxEngine.GUI;
 
 namespace FlaxEditor.Windows.Profiler
@@ -28,6 +28,7 @@ namespace FlaxEditor.Windows.Profiler
             {
                 AnchorPreset = AnchorPresets.HorizontalStretchTop,
                 Offsets = Margin.Zero,
+                Pivot = Float2.Zero,
                 IsScrollable = true,
                 Parent = panel,
             };
@@ -36,14 +37,14 @@ namespace FlaxEditor.Windows.Profiler
             _nativeAllocationsChart = new SingleChart
             {
                 Title = "Native Memory Allocation",
-                FormatSample = v => Utilities.Utils.FormatBytesCount((int)v),
+                FormatSample = v => Utilities.Utils.FormatBytesCount((ulong)v),
                 Parent = layout,
             };
             _nativeAllocationsChart.SelectedSampleChanged += OnSelectedSampleChanged;
             _managedAllocationsChart = new SingleChart
             {
                 Title = "Managed Memory Allocation",
-                FormatSample = v => Utilities.Utils.FormatBytesCount((int)v),
+                FormatSample = v => Utilities.Utils.FormatBytesCount((ulong)v),
                 Parent = layout,
             };
             _managedAllocationsChart.SelectedSampleChanged += OnSelectedSampleChanged;

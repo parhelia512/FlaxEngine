@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System.ComponentModel;
 using FlaxEngine;
@@ -7,6 +7,32 @@ using FlaxEngine;
 
 namespace FlaxEditor.Options
 {
+    /// <summary>
+    /// Action to perform when a Scene Node receive a double mouse left click.
+    /// </summary>
+    public enum SceneNodeDoubleClick
+    {
+        /// <summary>
+        /// Toggles expand/state of the node.
+        /// </summary>
+        Expand,
+
+        /// <summary>
+        /// Rename the node.
+        /// </summary>
+        RenameActor,
+
+        /// <summary>
+        /// Focus the object in the viewport.
+        /// </summary>
+        FocusActor,
+
+        /// <summary>
+        /// If possible, open the scene node in an associated Editor (eg. Prefab Editor).
+        /// </summary>
+        OpenPrefab,
+    }
+
     /// <summary>
     /// Input editor options data container.
     /// </summary>
@@ -55,6 +81,10 @@ namespace FlaxEditor.Options
         [DefaultValue(typeof(InputBinding), "Ctrl+A")]
         [EditorDisplay("Common"), EditorOrder(190)]
         public InputBinding SelectAll = new InputBinding(KeyboardKeys.A, KeyboardKeys.Control);
+
+        [DefaultValue(typeof(InputBinding), "Ctrl+Shift+A")]
+        [EditorDisplay("Common"), EditorOrder(195)]
+        public InputBinding DeselectAll = new InputBinding(KeyboardKeys.A, KeyboardKeys.Shift, KeyboardKeys.Control);
 
         [DefaultValue(typeof(InputBinding), "F")]
         [EditorDisplay("Common"), EditorOrder(200)]
@@ -112,6 +142,10 @@ namespace FlaxEditor.Options
         [EditorDisplay("Scene", "Snap To Ground"), EditorOrder(500)]
         public InputBinding SnapToGround = new InputBinding(KeyboardKeys.End);
 
+        [DefaultValue(typeof(InputBinding), "End")]
+        [EditorDisplay("Scene", "Vertex Snapping"), EditorOrder(550)]
+        public InputBinding SnapToVertex = new InputBinding(KeyboardKeys.V);
+
         [DefaultValue(typeof(InputBinding), "F5")]
         [EditorDisplay("Scene", "Play/Stop"), EditorOrder(510)]
         public InputBinding Play = new InputBinding(KeyboardKeys.F5);
@@ -151,6 +185,10 @@ namespace FlaxEditor.Options
         [DefaultValue(typeof(InputBinding), "None")]
         [EditorDisplay("Scene"), EditorOrder(573)]
         public InputBinding PilotActor = new InputBinding(KeyboardKeys.None);
+
+        [DefaultValue(typeof(InputBinding), "Ctrl+G")]
+        [EditorDisplay("Scene"), EditorOrder(574)]
+        public InputBinding GroupSelectedActors = new InputBinding(KeyboardKeys.G, KeyboardKeys.Control);
 
         #endregion
 
@@ -312,6 +350,10 @@ namespace FlaxEditor.Options
         [EditorDisplay("Viewport"), EditorOrder(1750)]
         public InputBinding ViewpointBottom = new InputBinding(KeyboardKeys.Numpad2);
 
+        [DefaultValue(typeof(InputBinding), "NumpadDecimal")]
+        [EditorDisplay("Viewport"), EditorOrder(1760)]
+        public InputBinding ToggleOrthographic = new InputBinding(KeyboardKeys.NumpadDecimal);
+
         #endregion
 
         #region Interface
@@ -327,6 +369,10 @@ namespace FlaxEditor.Options
         [DefaultValue(typeof(InputBinding), "Shift+Ctrl+Tab")]
         [EditorDisplay("Interface"), EditorOrder(2020)]
         public InputBinding PreviousTab = new InputBinding(KeyboardKeys.Tab, KeyboardKeys.Control, KeyboardKeys.Shift);
+
+        [DefaultValue(SceneNodeDoubleClick.Expand)]
+        [EditorDisplay("Interface"), EditorOrder(2030)]
+        public SceneNodeDoubleClick DoubleClickSceneNode = SceneNodeDoubleClick.Expand;
 
         #endregion
     }

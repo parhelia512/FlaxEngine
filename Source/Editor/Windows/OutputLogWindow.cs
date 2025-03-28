@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -79,6 +79,14 @@ namespace FlaxEditor.Windows
             /// The error text style.
             /// </summary>
             public TextBlockStyle ErrorStyle;
+
+            /// <inheritdoc />
+            public override bool OnKeyDown(KeyboardKeys key)
+            {
+                if (Window.InputActions.Process(Editor.Instance, this, key))
+                    return true;
+                return base.OnKeyDown(key);
+            }
 
             /// <inheritdoc />
             protected override void OnParseTextBlocks()
@@ -202,6 +210,8 @@ namespace FlaxEditor.Windows
             Editor.Options.OptionsChanged += OnEditorOptionsChanged;
             OnEditorOptionsChanged(Editor.Options.Options);
 
+            InputActions.Add(options => options.Search, _searchBox.Focus);
+
             GameCooker.Event += OnGameCookerEvent;
             ScriptsBuilder.CompilationFailed += OnScriptsCompilationFailed;
         }
@@ -262,10 +272,10 @@ namespace FlaxEditor.Windows
 
         private void OnOutputTextChanged()
         {
-            if (IsLayoutLocked)
+            if (IsLayoutLocked || _output == null)
                 return;
 
-            _hScroll.Maximum = _output.TextSize.X;
+            _hScroll.Maximum = Mathf.Max(_output.TextSize.X, _hScroll.Minimum);
             _vScroll.Maximum = Mathf.Max(_output.TextSize.Y - _output.Height, _vScroll.Minimum);
         }
 
@@ -276,7 +286,9 @@ namespace FlaxEditor.Windows
                 _output.DefaultStyle.Font == options.Interface.OutputLogTextFont &&
                 _output.DefaultStyle.Color == options.Interface.OutputLogTextColor &&
                 _output.DefaultStyle.ShadowColor == options.Interface.OutputLogTextShadowColor &&
-                _output.DefaultStyle.ShadowOffset == options.Interface.OutputLogTextShadowOffset)
+                _output.DefaultStyle.ShadowOffset == options.Interface.OutputLogTextShadowOffset &&
+                _output.WarningStyle.Color == options.Interface.OutputLogWarningTextColor &&
+                _output.ErrorStyle.Color == options.Interface.OutputLogErrorTextColor)
                 return;
 
             _output.DefaultStyle = new TextBlockStyle
@@ -287,10 +299,11 @@ namespace FlaxEditor.Windows
                 ShadowOffset = options.Interface.OutputLogTextShadowOffset,
                 BackgroundSelectedBrush = new SolidColorBrush(Style.Current.BackgroundSelected),
             };
+
             _output.WarningStyle = _output.DefaultStyle;
-            _output.WarningStyle.Color = Color.Yellow;
+            _output.WarningStyle.Color = options.Interface.OutputLogWarningTextColor;
             _output.ErrorStyle = _output.DefaultStyle;
-            _output.ErrorStyle.Color = Color.Red;
+            _output.ErrorStyle.Color = options.Interface.OutputLogErrorTextColor;
 
             _timestampsFormats = options.Interface.OutputLogTimestampsFormat;
             _showLogType = options.Interface.OutputLogShowLogType;
@@ -590,8 +603,10 @@ namespace FlaxEditor.Windows
                 // Update the output
                 var cachedScrollValue = _vScroll.Value;
                 var cachedSelection = _output.SelectionRange;
-                var isBottomScroll = _vScroll.Value >= _vScroll.Maximum - 20.0f || wasEmpty;
+                var cachedOutputTargetViewOffset = _output.TargetViewOffset;
+                var isBottomScroll = _vScroll.Value >= _vScroll.Maximum - (_scrollSize * 2) || wasEmpty;
                 _output.Text = _textBuffer.ToString();
+                _output.TargetViewOffset = cachedOutputTargetViewOffset;
                 _textBufferCount = _entries.Count;
                 if (!_vScroll.IsThumbClicked)
                     _vScroll.TargetValue = isBottomScroll ? _vScroll.Maximum : cachedScrollValue;

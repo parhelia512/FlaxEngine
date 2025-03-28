@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 
@@ -66,7 +66,7 @@ namespace FlaxEngine
         {
             return FindActor(typeof(T)) as T;
         }
-        
+
         /// <summary>
         /// Tries to find actor of the given type and name in all loaded scenes.
         /// </summary>
@@ -77,7 +77,7 @@ namespace FlaxEngine
         {
             return FindActor(typeof(T), name) as T;
         }
-        
+
         /// <summary>
         /// Tries to find actor of the given type and tag in a root actor or all loaded scenes.
         /// </summary>
@@ -102,13 +102,18 @@ namespace FlaxEngine
         }
 
         /// <summary>
-        /// Finds all the scripts of the given type in all the loaded scenes.
+        /// Finds all the scripts of the given type in an actor or all the loaded scenes.
         /// </summary>
         /// <typeparam name="T">Type of the object.</typeparam>
+        /// <param name="root">The root to find scripts. If null, will search in all scenes</param>
         /// <returns>Found scripts list.</returns>
-        public static T[] GetScripts<T>() where T : Script
+        public static T[] GetScripts<T>(Actor root = null) where T : Script
         {
-            var scripts = GetScripts(typeof(T));
+            var scripts = GetScripts(typeof(T), root);
+            if (typeof(T) == typeof(Script))
+                return (T[])scripts;
+            if (scripts.Length == 0)
+                return Array.Empty<T>();
             var result = new T[scripts.Length];
             for (int i = 0; i < scripts.Length; i++)
                 result[i] = scripts[i] as T;
@@ -119,10 +124,15 @@ namespace FlaxEngine
         /// Finds all the actors of the given type in all the loaded scenes.
         /// </summary>
         /// <typeparam name="T">Type of the object.</typeparam>
+        /// <param name="activeOnly">Finds only active actors.</param>
         /// <returns>Found actors list.</returns>
-        public static T[] GetActors<T>() where T : Actor
+        public static T[] GetActors<T>(bool activeOnly = false) where T : Actor
         {
-            var actors = GetActors(typeof(T));
+            var actors = GetActors(typeof(T), activeOnly);
+            if (typeof(T) == typeof(Actor))
+                return (T[])actors;
+            if (actors.Length == 0)
+                return Array.Empty<T>();
             var result = new T[actors.Length];
             for (int i = 0; i < actors.Length; i++)
                 result[i] = actors[i] as T;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -110,8 +110,8 @@ public:
 
     struct StreamingCache
     {
-        int64 LastUpdate = 0;
-        int64 TargetResidencyChange = 0;
+        double LastUpdateTime = 0.0;
+        double TargetResidencyChangeTime = 0;
         int32 TargetResidency = 0;
         bool Error = false;
         SamplesBuffer<float, 5> QualitySamples;

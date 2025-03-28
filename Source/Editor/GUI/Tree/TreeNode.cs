@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEngine;
@@ -16,17 +16,26 @@ namespace FlaxEditor.GUI.Tree
         /// <summary>
         /// The default drag insert position margin.
         /// </summary>
-        public const float DefaultDragInsertPositionMargin = 2.0f;
+        public const float DefaultDragInsertPositionMargin = 3.0f;
 
         /// <summary>
         /// The default node offset on Y axis.
         /// </summary>
         public const float DefaultNodeOffsetY = 0;
 
+        private const float _targetHighlightScale = 1.25f;
+        private const float _highlightScaleAnimDuration = 0.85f;
+
         private Tree _tree;
 
         private bool _opened, _canChangeOrder;
         private float _animationProgress, _cachedHeight;
+        private bool _isHightlighted;
+        private float _targetHighlightTimeSec;
+        private float _currentHighlightTimeSec;
+        // Used to prevent showing highlight on double mouse click
+        private float _debounceHighlightTime;
+        private float _highlightScale;
         private bool _mouseOverArrow, _mouseOverHeader;
         private float _xOffset, _textWidth;
         private float _headerHeight = 16.0f;
@@ -38,10 +47,10 @@ namespace FlaxEditor.GUI.Tree
         private bool _isMouseDown;
         private float _mouseDownTime;
         private Float2 _mouseDownPos;
-        private Color _cachedTextColor;
 
         private DragItemPositioning _dragOverMode;
         private bool _isDragOverHeader;
+        private static ulong _dragEndFrame;
 
         /// <summary>
         /// Gets or sets the text.
@@ -89,6 +98,11 @@ namespace FlaxEditor.GUI.Tree
                     Expand(true);
             }
         }
+
+        /// <summary>
+        /// Gets a value indicating whether the node is collapsed in the hierarchy (is collapsed or any of its parents is collapsed).
+        /// </summary>
+        public bool IsCollapsedInHierarchy => IsCollapsed || (Parent is TreeNode parentNode && parentNode.IsCollapsedInHierarchy);
 
         /// <summary>
         /// Gets or sets the text margin.
@@ -546,14 +560,33 @@ namespace FlaxEditor.GUI.Tree
         /// Updates the drag over mode based on the given mouse location.
         /// </summary>
         /// <param name="location">The location.</param>
-        private void UpdateDrawPositioning(ref Float2 location)
+        private void UpdateDragPositioning(ref Float2 location)
         {
+            // Check collision with drag areas
             if (new Rectangle(_headerRect.X, _headerRect.Y - DefaultDragInsertPositionMargin - DefaultNodeOffsetY, _headerRect.Width, DefaultDragInsertPositionMargin * 2.0f).Contains(location))
                 _dragOverMode = DragItemPositioning.Above;
             else if ((IsCollapsed || !HasAnyVisibleChild) && new Rectangle(_headerRect.X, _headerRect.Bottom - DefaultDragInsertPositionMargin, _headerRect.Width, DefaultDragInsertPositionMargin * 2.0f).Contains(location))
                 _dragOverMode = DragItemPositioning.Below;
             else
                 _dragOverMode = DragItemPositioning.At;
+
+            // Update DraggedOverNode
+            var tree = ParentTree;
+            if (_dragOverMode == DragItemPositioning.None)
+            {
+                if (tree != null && tree.DraggedOverNode == this)
+                    tree.DraggedOverNode = null;
+            }
+            else if (tree != null)
+                tree.DraggedOverNode = this;
+        }
+
+        private void ClearDragPositioning()
+        {
+            _dragOverMode = DragItemPositioning.None;
+            var tree = ParentTree;
+            if (tree != null && tree.DraggedOverNode == this)
+                tree.DraggedOverNode = null;
         }
 
         /// <summary>
@@ -581,11 +614,46 @@ namespace FlaxEditor.GUI.Tree
             }
         }
 
+        /// <summary>
+        /// Adds a box around the text to highlight the node.
+        /// </summary>
+        /// <param name="durationSec">The duration of the highlight in seconds.</param>
+        public void StartHighlight(float durationSec = 3)
+        {
+            _isHightlighted = true;
+            _targetHighlightTimeSec = durationSec;
+            _currentHighlightTimeSec = 0;
+            _debounceHighlightTime = 0;
+            _highlightScale = 2f;
+        }
+
+        /// <summary>
+        /// Stops any current highlight.
+        /// </summary>
+        public void StopHighlight()
+        {
+            _isHightlighted = false;
+            _targetHighlightTimeSec = 0;
+            _currentHighlightTimeSec = 0;
+            _debounceHighlightTime = 0;
+        }
+
         /// <inheritdoc />
         public override void Update(float deltaTime)
         {
-            // Cache text color
-            _cachedTextColor = CacheTextColor();
+            // Highlight animations
+            if (_isHightlighted)
+            {
+                _debounceHighlightTime += deltaTime;
+                _currentHighlightTimeSec += deltaTime;
+
+                // In the first second, animate the highlight to shrink into it's resting position
+                if (_currentHighlightTimeSec < _highlightScaleAnimDuration)
+                    _highlightScale = Mathf.Lerp(_highlightScale, _targetHighlightScale, _currentHighlightTimeSec);
+
+                if (_currentHighlightTimeSec >= _targetHighlightTimeSec)
+                    _isHightlighted = false;
+            }
 
             // Drop/down animation
             if (_animationProgress < 1.0f)
@@ -655,33 +723,76 @@ namespace FlaxEditor.GUI.Tree
                 textRect.Width -= 18.0f;
             }
 
+            float textWidth = TextFont.GetFont().MeasureText(_text).X;
+            Rectangle trueTextRect = textRect;
+            trueTextRect.Width = textWidth;
+            trueTextRect.Scale(_highlightScale);
+
+            if (_isHightlighted && _debounceHighlightTime > 0.1f)
+            {
+                Color highlightBackgroundColor = Editor.Instance.Options.Options.Visual.HighlightColor;
+                highlightBackgroundColor = highlightBackgroundColor.AlphaMultiplied(0.3f);
+                Render2D.FillRectangle(trueTextRect, highlightBackgroundColor);
+            }
+
             // Draw text
-            Render2D.DrawText(TextFont.GetFont(), _text, textRect, _cachedTextColor, TextAlignment.Near, TextAlignment.Center);
+            Color textColor = CacheTextColor();
+            Render2D.DrawText(TextFont.GetFont(), _text, textRect, textColor, TextAlignment.Near, TextAlignment.Center);
 
             // Draw drag and drop effect
             if (IsDragOver && _tree.DraggedOverNode == this)
             {
-                Color dragOverColor = style.BackgroundSelected;
-                Rectangle rect;
                 switch (_dragOverMode)
                 {
                 case DragItemPositioning.At:
-                    dragOverColor *= 0.6f;
-                    rect = textRect;
+                    Render2D.FillRectangle(textRect, style.Selection);
+                    Render2D.DrawRectangle(textRect, style.SelectionBorder);
                     break;
                 case DragItemPositioning.Above:
-                    dragOverColor *= 1.2f;
-                    rect = new Rectangle(textRect.X, textRect.Top - DefaultDragInsertPositionMargin - DefaultNodeOffsetY - _margin.Top, textRect.Width, DefaultDragInsertPositionMargin * 2.0f);
+                    Render2D.DrawRectangle(new Rectangle(textRect.X, textRect.Top - DefaultDragInsertPositionMargin * 0.5f - DefaultNodeOffsetY - _margin.Top, textRect.Width, DefaultDragInsertPositionMargin), style.SelectionBorder);
                     break;
                 case DragItemPositioning.Below:
-                    dragOverColor *= 1.2f;
-                    rect = new Rectangle(textRect.X, textRect.Bottom + _margin.Bottom - DefaultDragInsertPositionMargin, textRect.Width, DefaultDragInsertPositionMargin * 2.0f);
-                    break;
-                default:
-                    rect = Rectangle.Empty;
+                    Render2D.DrawRectangle(new Rectangle(textRect.X, textRect.Bottom + _margin.Bottom - DefaultDragInsertPositionMargin * 0.5f, textRect.Width, DefaultDragInsertPositionMargin), style.SelectionBorder);
                     break;
                 }
-                Render2D.FillRectangle(rect, dragOverColor);
+            }
+
+            // Show tree guidelines
+            if (Editor.Instance.Options.Options.Interface.ShowTreeLines)
+            {
+                TreeNode parentNode = Parent as TreeNode;
+                bool thisNodeIsLast = false;
+                while (parentNode != null && parentNode != ParentTree.Children[0])
+                {
+                    float bottomOffset = 0;
+                    float topOffset = 0;
+
+                    if (Parent == parentNode && this == Parent.Children[0])
+                        topOffset = 2;
+
+                    if (thisNodeIsLast && parentNode.Children.Count == 1)
+                        bottomOffset = topOffset != 0 ? 4 : 2;
+
+                    if (Parent == parentNode && this == Parent.Children[Parent.Children.Count - 1] && !_opened)
+                    {
+                        thisNodeIsLast = true;
+                        bottomOffset = topOffset != 0 ? 4 : 2;
+                    }
+
+                    float leftOffset = 9;
+                    // Adjust offset for icon image
+                    if (_iconCollaped.IsValid)
+                        leftOffset += 18;
+                    var lineRect1 = new Rectangle(parentNode.TextRect.Left - leftOffset, parentNode.HeaderRect.Top + topOffset, 1, parentNode.HeaderRect.Height - bottomOffset);
+                    Render2D.FillRectangle(lineRect1, isSelected ? style.ForegroundGrey : style.LightBackground);
+                    parentNode = parentNode.Parent as TreeNode;
+                }
+            }
+
+            if (_isHightlighted && _debounceHighlightTime > 0.1f)
+            {
+                // Draw highlights
+                Render2D.DrawRectangle(trueTextRect, Editor.Instance.Options.Options.Visual.HighlightColor, 3);
             }
 
             // Base
@@ -696,6 +807,80 @@ namespace FlaxEditor.GUI.Tree
                 else
                 {
                     base.Draw();
+                }
+            }
+        }
+
+        /// <inheritdoc />
+        protected override void DrawChildren()
+        {
+            // Draw all visible child controls
+            var children = _children;
+            if (children.Count == 0)
+                return;
+            var last = children.Count - 1;
+
+            if (CullChildren)
+            {
+                Render2D.PeekClip(out var globalClipping);
+                Render2D.PeekTransform(out var globalTransform);
+
+                // Try to estimate the rough location of the first and the last nodes, assuming the node height is constant
+                var firstChildGlobalRect = GetChildGlobalRectangle(children[0], ref globalTransform);
+                var firstVisibleChild = Math.Clamp((int)Math.Floor((globalClipping.Top - firstChildGlobalRect.Top) / _headerHeight) + 1, 0, last);
+                if (GetChildGlobalRectangle(children[firstVisibleChild], ref globalTransform).Top > globalClipping.Top || !children[firstVisibleChild].Visible)
+                {
+                    // Estimate overshoot, either it's partially visible or hidden in the tree
+                    for (; firstVisibleChild > 0; firstVisibleChild--)
+                    {
+                        var child = children[firstVisibleChild];
+                        if (!child.Visible)
+                            continue;
+                        if (GetChildGlobalRectangle(child, ref globalTransform).Top < globalClipping.Top)
+                            break;
+                    }
+                }
+                var lastVisibleChild = Math.Clamp((int)Math.Ceiling((globalClipping.Bottom - firstChildGlobalRect.Top) / _headerHeight) + 1, firstVisibleChild, last);
+                if (GetChildGlobalRectangle(children[lastVisibleChild], ref globalTransform).Top < globalClipping.Bottom || !children[lastVisibleChild].Visible)
+                {
+                    // Estimate overshoot, either it's partially visible or hidden in the tree
+                    for (; lastVisibleChild < last; lastVisibleChild++)
+                    {
+                        var child = children[lastVisibleChild];
+                        if (!child.Visible)
+                            continue;
+                        if (GetChildGlobalRectangle(child, ref globalTransform).Top > globalClipping.Bottom)
+                            break;
+                    }
+                }
+
+                for (int i = firstVisibleChild; i <= lastVisibleChild; i++)
+                {
+                    var child = children[i];
+                    if (!child.Visible)
+                        continue;
+                    Render2D.PushTransform(ref child._cachedTransform);
+                    child.Draw();
+                    Render2D.PopTransform();
+                }
+
+                static Rectangle GetChildGlobalRectangle(Control control, ref Matrix3x3 globalTransform)
+                {
+                    Matrix3x3.Multiply(ref control._cachedTransform, ref globalTransform, out var globalChildTransform);
+                    return new Rectangle(globalChildTransform.M31, globalChildTransform.M32, control.Width * globalChildTransform.M11, control.Height * globalChildTransform.M22);
+                }
+            }
+            else
+            {
+                for (int i = 0; i <= last; i++)
+                {
+                    var child = children[i];
+                    if (child.Visible)
+                    {
+                        Render2D.PushTransform(ref child._cachedTransform);
+                        child.Draw();
+                        Render2D.PopTransform();
+                    }
                 }
             }
         }
@@ -736,9 +921,8 @@ namespace FlaxEditor.GUI.Tree
             UpdateMouseOverFlags(location);
 
             // Clear flag for left button
-            if (button == MouseButton.Left)
+            if (button == MouseButton.Left && _isMouseDown)
             {
-                // Clear flag
                 _isMouseDown = false;
                 _mouseDownTime = -1;
             }
@@ -746,6 +930,10 @@ namespace FlaxEditor.GUI.Tree
             // Check if mouse hits bar and node isn't a root
             if (_mouseOverHeader)
             {
+                // Skip mouse up event right after drag drop ends
+                if (button == MouseButton.Left && Engine.FrameCount - _dragEndFrame < 10)
+                    return true;
+
                 // Prevent from selecting node when user is just clicking at an arrow
                 if (!_mouseOverArrow)
                 {
@@ -937,20 +1125,18 @@ namespace FlaxEditor.GUI.Tree
             _dragOverMode = DragItemPositioning.None;
             if (result == DragDropEffect.None)
             {
-                UpdateDrawPositioning(ref location);
-                if (ParentTree != null)
-                    ParentTree.DraggedOverNode = this;
+                UpdateDragPositioning(ref location);
 
                 // Check if mouse is over header
                 _isDragOverHeader = TestHeaderHit(ref location);
                 if (_isDragOverHeader)
                 {
-                    // Check if mouse is over arrow
+                    if (ParentTree != null)
+                        ParentTree.DraggedOverNode = this;
+
+                    // Expand node if mouse goes over arrow
                     if (ArrowRect.Contains(location) && HasAnyVisibleChild)
-                    {
-                        // Expand node (no animation)
                         Expand(true);
-                    }
 
                     result = OnDragEnterHeader(data);
                 }
@@ -968,25 +1154,30 @@ namespace FlaxEditor.GUI.Tree
             var result = base.OnDragMove(ref location, data);
 
             // Check if no children handled that event
-            _dragOverMode = DragItemPositioning.None;
+            ClearDragPositioning();
             if (result == DragDropEffect.None)
             {
-                UpdateDrawPositioning(ref location);
+                UpdateDragPositioning(ref location);
 
                 // Check if mouse is over header
                 bool isDragOverHeader = TestHeaderHit(ref location);
                 if (isDragOverHeader)
                 {
+                    if (ParentTree != null)
+                        ParentTree.DraggedOverNode = this;
+
+                    // Expand node if mouse goes over arrow
                     if (ArrowRect.Contains(location) && HasAnyVisibleChild)
-                    {
-                        // Expand node (no animation)
                         Expand(true);
-                    }
 
                     if (!_isDragOverHeader)
                         result = OnDragEnterHeader(data);
                     else
                         result = OnDragMoveHeader(data);
+                }
+                else if (_isDragOverHeader)
+                {
+                    OnDragLeaveHeader();
                 }
                 _isDragOverHeader = isDragOverHeader;
 
@@ -1005,7 +1196,8 @@ namespace FlaxEditor.GUI.Tree
             // Check if no children handled that event
             if (result == DragDropEffect.None)
             {
-                UpdateDrawPositioning(ref location);
+                UpdateDragPositioning(ref location);
+                _dragEndFrame = Engine.FrameCount;
 
                 // Check if mouse is over header
                 if (TestHeaderHit(ref location))
@@ -1016,9 +1208,7 @@ namespace FlaxEditor.GUI.Tree
 
             // Clear cache
             _isDragOverHeader = false;
-            _dragOverMode = DragItemPositioning.None;
-            if (ParentTree != null)
-                ParentTree.DraggedOverNode = null;
+            ClearDragPositioning();
 
             return result;
         }
@@ -1032,7 +1222,7 @@ namespace FlaxEditor.GUI.Tree
                 _isDragOverHeader = false;
                 OnDragLeaveHeader();
             }
-            _dragOverMode = DragItemPositioning.None;
+            ClearDragPositioning();
 
             base.OnDragLeave();
         }
@@ -1087,7 +1277,6 @@ namespace FlaxEditor.GUI.Tree
             {
                 // TODO: perform layout for any non-TreeNode controls
                 _cachedHeight = _headerHeight;
-                _cachedTextColor = CacheTextColor();
                 Size = new Float2(width, _headerHeight);
             }
 
@@ -1137,7 +1326,6 @@ namespace FlaxEditor.GUI.Tree
             }
 
             _cachedHeight = height;
-            _cachedTextColor = CacheTextColor();
             Height = Mathf.Max(_headerHeight, y);
         }
 

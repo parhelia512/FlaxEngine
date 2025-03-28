@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2023 Wojciech Figat. All rights reserved.
+// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
 
 #include "BinaryAsset.h"
 #include "Cache/AssetsCache.h"
@@ -507,8 +507,7 @@ public:
     /// </summary>
     /// <param name="asset">The asset.</param>
     InitAssetTask(BinaryAsset* asset)
-        : ContentLoadTask(Type::Custom)
-        , _asset(asset)
+        : _asset(asset)
         , _dataLock(asset->Storage->Lock())
     {
     }
@@ -527,8 +526,6 @@ protected:
         AssetReference<BinaryAsset> ref = _asset.Get();
         if (ref == nullptr)
             return Result::MissingReferences;
-
-        // Prepare
         auto storage = ref->Storage;
         auto factory = (BinaryAssetFactoryBase*)Content::GetAssetFactory(ref->GetTypeName());
         ASSERT(factory);
@@ -548,7 +545,6 @@ protected:
         _dataLock.Release();
         _asset = nullptr;
 
-        // Base
         ContentLoadTask::OnEnd();
     }
 };
@@ -584,7 +580,43 @@ Asset::LoadResult BinaryAsset::loadAsset()
     ASSERT(Storage && _header.ID.IsValid() && _header.TypeName.HasChars());
 
     auto lock = Storage->Lock();
-    return load();
+    auto chunksToPreload = getChunksToPreload();
+    if (chunksToPreload != 0)
+    {
+        // Ensure that any chunks that were requested before are loaded in memory (in case streaming flushed them out after timeout)
+        for (int32 i = 0; i < ASSET_FILE_DATA_CHUNKS; i++)
+        {
+            const auto chunk = _header.Chunks[i];
+            if (GET_CHUNK_FLAG(i) & chunksToPreload && chunk && chunk->IsMissing())
+                Storage->LoadAssetChunk(chunk);
+        }
+    }
+    const LoadResult result = load();
+#if !BUILD_RELEASE
+    if (result == LoadResult::MissingDataChunk)
+    {
+        // Provide more insights on potentially missing asset data chunk
+        Char chunksBitMask[ASSET_FILE_DATA_CHUNKS + 1];
+        Char chunksExistBitMask[ASSET_FILE_DATA_CHUNKS + 1];
+        Char chunksLoadBitMask[ASSET_FILE_DATA_CHUNKS + 1];
+        for (int32 i = 0; i < ASSET_FILE_DATA_CHUNKS; i++)
+        {
+            if (const FlaxChunk* chunk = _header.Chunks[i])
+            {
+                chunksBitMask[i] = '1';
+                chunksExistBitMask[i] = chunk->ExistsInFile() ? '1' : '0';
+                chunksLoadBitMask[i] = chunk->IsLoaded() ? '1' : '0';
+            }
+            else
+            {
+                chunksBitMask[i] = chunksExistBitMask[i] = chunksLoadBitMask[i] = '0';
+            }
+        }
+        chunksBitMask[ASSET_FILE_DATA_CHUNKS] = chunksExistBitMask[ASSET_FILE_DATA_CHUNKS] = chunksLoadBitMask[ASSET_FILE_DATA_CHUNKS] = 0;
+        LOG(Warning, "Asset reports missing data chunk. Chunks bitmask: {}, existing chunks: {} loaded chunks: {}. '{}'", chunksBitMask, chunksExistBitMask, chunksLoadBitMask, ToString());
+    }
+#endif
+    return result;
 }
 
 void BinaryAsset::releaseStorage()
